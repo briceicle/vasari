@@ -1,0 +1,1 @@
+/Users/briceicle/conductor/repos/oss/.claude/skills/gstack/autoplan/SKILL.md
