@@ -1,0 +1,20 @@
+[workspace]
+members = ["crates/vasari-core", "crates/vasari"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/briceicle/vasari"
+authors = ["Brice Icle <brice@canopylab.co>"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+thiserror = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+flate2 = "1"
