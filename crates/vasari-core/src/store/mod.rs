@@ -162,8 +162,23 @@ impl ObjectStore {
 
 /// Encode a file path as a safe directory name for the index.
 /// Slashes become `%2F`, percent signs become `%25`.
+/// The `..` component is rejected: Path::join("..")` resolves to the parent
+/// directory, which would let an adversarially crafted session file write
+/// index entries outside the targets/ subdirectory.
 fn encode_path(path: &str) -> String {
-    path.replace('%', "%25").replace('/', "%2F")
+    // Split on '/', sanitize each component, join with encoded slash.
+    // ".." and "." are replaced before percent-encoding to avoid the double-encoding
+    // bug that would occur if we encoded '%' after injecting "%2E%2E".
+    // Path::join("..") in Rust traverses to the parent directory, so without this
+    // fix an adversarially crafted session file could write index entries outside
+    // the targets/ subdirectory.
+    path.split('/')
+        .map(|component| match component {
+            ".." | "." => "%2E%2E".to_string(),
+            other => other.replace('%', "%25"),
+        })
+        .collect::<Vec<_>>()
+        .join("%2F")
 }
 
 #[cfg(test)]
