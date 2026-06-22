@@ -1,0 +1,17 @@
+[package]
+name = "vasari"
+description = "Intent attribution CLI for autonomous coding agents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "vasari"
+path = "src/main.rs"
+
+[dependencies]
+vasari-core = { path = "../vasari-core" }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+clap = { version = "4", features = ["derive"] }

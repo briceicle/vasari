@@ -1,0 +1,50 @@
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum VasariError {
+    #[error("node not found: {0}")]
+    NodeNotFound(String),
+    #[error("hash mismatch: expected {expected}, got {actual}")]
+    HashMismatch { expected: String, actual: String },
+    #[error("invalid node id: {0}")]
+    InvalidNodeId(String),
+    #[error("no attribution found for {path}:{line}")]
+    AttributionNotFound { path: String, line: u32 },
+    #[error("plan not found: {0}")]
+    PlanNotFound(String),
+    #[error("degraded ingest: {0}")]
+    Degraded(DegradedReason),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("json: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+/// Typed degradation reasons for the shared ingest pipeline.
+///
+/// The adapter layer returns these rather than panicking when sessions
+/// have missing fields. The caller decides whether to skip or surface.
+#[derive(Debug, Clone)]
+pub enum DegradedReason {
+    MissingTimestamp { tool: String },
+    MissingArgs { tool: String },
+    UnknownTool(String),
+    UnparsableSession { source: String, detail: String },
+    UnparsableSpan { span_name: String, detail: String },
+}
+
+impl std::fmt::Display for DegradedReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingTimestamp { tool } => write!(f, "missing timestamp on tool call '{tool}'"),
+            Self::MissingArgs { tool } => write!(f, "missing args on tool call '{tool}'"),
+            Self::UnknownTool(t) => write!(f, "unknown tool '{t}'"),
+            Self::UnparsableSession { source, detail } => {
+                write!(f, "unparsable session from {source}: {detail}")
+            }
+            Self::UnparsableSpan { span_name, detail } => {
+                write!(f, "unparsable span '{span_name}': {detail}")
+            }
+        }
+    }
+}

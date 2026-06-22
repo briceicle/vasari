@@ -1,0 +1,4 @@
+/target
+.vasari/
+*.orig
+.DS_Store
