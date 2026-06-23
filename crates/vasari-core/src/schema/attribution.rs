@@ -52,7 +52,14 @@ impl Attribution {
         parent_ids: Vec<NodeId>,
     ) -> Self {
         let id = NodeId(node_id(&Self::hash_input(&action_id, &target, &parent_ids)));
-        Self { id, action_id, target, confidence, evidence, parent_ids }
+        Self {
+            id,
+            action_id,
+            target,
+            confidence,
+            evidence,
+            parent_ids,
+        }
     }
 
     /// confidence and evidence are intentionally excluded — confidence is a computed

@@ -15,8 +15,17 @@ pub struct Constraint {
 
 impl Constraint {
     pub fn new(text: String, derived_from: NodeId, parent_ids: Vec<NodeId>) -> Self {
-        let id = NodeId(node_id(&Self::hash_input(&text, &derived_from, &parent_ids)));
-        Self { id, text, derived_from, parent_ids }
+        let id = NodeId(node_id(&Self::hash_input(
+            &text,
+            &derived_from,
+            &parent_ids,
+        )));
+        Self {
+            id,
+            text,
+            derived_from,
+            parent_ids,
+        }
     }
 
     fn hash_input(text: &str, derived_from: &NodeId, parent_ids: &[NodeId]) -> serde_json::Value {
