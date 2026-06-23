@@ -44,7 +44,15 @@ impl Action {
             &plan_ref,
             &parent_ids,
         )));
-        Self { id, tool, args, result_summary, timestamp, plan_ref, parent_ids }
+        Self {
+            id,
+            tool,
+            args,
+            result_summary,
+            timestamp,
+            plan_ref,
+            parent_ids,
+        }
     }
 
     /// result_summary is intentionally excluded — it's an annotation, not identity.

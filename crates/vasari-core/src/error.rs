@@ -13,7 +13,11 @@ pub enum VasariError {
     #[error("plan not found: {0}")]
     PlanNotFound(String),
     #[error("plan step index {step_index} out of bounds for plan {plan_id} ({step_count} steps) — graph may be corrupt; run `vasari fsck`")]
-    PlanStepOutOfBounds { plan_id: String, step_index: usize, step_count: usize },
+    PlanStepOutOfBounds {
+        plan_id: String,
+        step_index: usize,
+        step_count: usize,
+    },
     #[error("degraded ingest: {0}")]
     Degraded(DegradedReason),
     #[error("io: {0}")]
