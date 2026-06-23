@@ -7,6 +7,52 @@ Version scheme: `MAJOR.MINOR.PATCH.BUILD` (gstack convention).
 
 ---
 
+## [0.2.0.0] — 2026-06-22
+
+### Added
+
+**vasari-core** (`crates/vasari-core`)
+
+- `vasari ingest claude-code <path>` — parse Claude Code session JSONL into the intent graph:
+  human/assistant/system/summary record types; filters /commands, boilerplate, dotdot/absolute paths
+- `vasari ingest otel-genai <path>` — parse OTLP JSON (GenAI semconv ≥ 1.30.0) via two-pass
+  span tree reconstruction; root spans become UserPrompt/SystemInstruction, child spans become ToolCall
+- `IngestAdapter` trait + `IngestEvent` enum — adapter contract for both ingest paths
+- `run_pipeline()` — shared parse → redact → synthesize → store → index pipeline; non-fatal
+  degradations collected into `IngestSummary.degraded` (never panics)
+- `redact()` — secret redaction: regex patterns (sk-*, AKIA*, ghp_/gho_/ghs_/ghr_/ghu_*, Bearer),
+  Shannon entropy heuristic (>4.5 bits/char), preserves 40-hex git SHAs and 36-char UUIDs
+- `extract_constraints()` — rule-based constraint extraction from must/shall/always/never/must-not
+  keywords with sentence-level splitting and `ConstraintPolarity` (Mandatory | Prohibitive)
+- `ConstraintPolarity` enum on `Constraint` nodes — included in content hash (different polarity → different node ID)
+- `schema_version` field on all five node types — stored but excluded from content hash
+- `Intent::new_at()` constructor for deterministic timestamps during ingest
+- `ObjectStore::iter_all()` — walks objects/ for `vasari sessions` / `vasari files`
+- `ObjectStore::lookup_attributions()` now deduplicates on read (sort + dedup) to handle re-ingest
+- `regex` and `once_cell` added to workspace dependencies
+- Integration tests: end-to-end ingest, idempotency, iter_all, fixture-based golden tests
+- Test fixtures: `tests/fixtures/claude_code/simple-edit-session.jsonl`, `tests/fixtures/otel/simple-gen-ai.json`
+- 70+ unit tests across all new modules
+
+**vasari** (`crates/vasari`)
+
+- `vasari ingest claude-code <path>` / `otel-genai <path>` — subcommand shape (replaces stub)
+- `vasari sessions` — list Intent nodes sorted by creation time
+- `vasari files` — list files with attribution coverage
+- `vasari constrain "<text>" --plan <id> [--polarity mandatory|prohibitive]` — pin a constraint manually
+- `vasari fsck` — rebuild index from object store (was wired in v0.1; now has a real backing method)
+
+**Docs / Spec**
+
+- `INTENT-SPEC.md` updated: `schema_version` excluded from hash (with rationale), semconv pin ≥ 1.30.0
+
+### Changed
+
+- `vasari ingest` is now a subcommand (`claude-code` / `otel-genai`) rather than `--adapter` flag
+- `Constraint` nodes now include `polarity` field (breaking schema change — no stored nodes to migrate)
+
+---
+
 ## [0.1.0.0] — 2026-06-22
 
 ### Added
