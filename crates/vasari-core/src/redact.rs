@@ -3,8 +3,10 @@ use regex::Regex;
 
 static SECRET_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     vec![
-        // OpenAI / Anthropic API keys
+        // OpenAI API keys (sk- followed by alphanumeric only)
         Regex::new(r"sk-[A-Za-z0-9]{20,}").unwrap(),
+        // Anthropic API keys (sk-ant-api03-... format; hyphens in body)
+        Regex::new(r"sk-ant-[A-Za-z0-9\-]{10,}").unwrap(),
         // AWS access key IDs
         Regex::new(r"AKIA[A-Z0-9]{16}").unwrap(),
         // GitHub personal access tokens (classic and fine-grained)
@@ -122,6 +124,15 @@ mod tests {
         let text = format!("node id {uuid}");
         let result = redact(&text);
         assert!(result.contains(uuid), "UUID should not be redacted");
+    }
+
+    #[test]
+    fn redacts_anthropic_key() {
+        let token = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890abcdef";
+        let text = format!("key={token}");
+        let result = redact(&text);
+        assert!(result.contains(REDACTED), "Anthropic API key should be redacted");
+        assert!(!result.contains("sk-ant-api03-"));
     }
 
     #[test]
