@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::HashSet;
 
 use crate::error::VasariError;
@@ -95,7 +96,10 @@ pub fn why_all(
     // Deduplicate attribution IDs before walking — the append-only index can
     // accumulate duplicates if the store is manually manipulated.
     let mut seen = HashSet::new();
-    let attr_ids: Vec<NodeId> = attr_ids.into_iter().filter(|id| seen.insert(id.clone())).collect();
+    let attr_ids: Vec<NodeId> = attr_ids
+        .into_iter()
+        .filter(|id| seen.insert(id.clone()))
+        .collect();
 
     let mut chains = Vec::new();
 
@@ -177,16 +181,14 @@ fn resolve_one(store: &ObjectStore, attr_id: &NodeId) -> Result<ResolveChain, Va
     for intent_id in &plan.intent_ids {
         match store.get(intent_id)? {
             Some(Node::Intent(i)) => intents.push(i),
-            Some(_) => eprintln!(
-                "vasari: warn: intent id {intent_id} is not an Intent node — skipping"
-            ),
-            None => eprintln!(
-                "vasari: warn: intent node {intent_id} not found — skipping"
-            ),
+            Some(_) => {
+                eprintln!("vasari: warn: intent id {intent_id} is not an Intent node — skipping")
+            }
+            None => eprintln!("vasari: warn: intent node {intent_id} not found — skipping"),
         }
     }
     // Most recent amendment first.
-    intents.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    intents.sort_by_key(|i| Reverse(i.created_at));
 
     // Constraints are empty until ingest adapters populate them (v0.1).
     let constraints: Vec<Constraint> = Vec::new();
@@ -225,18 +227,16 @@ mod tests {
         plan
     }
 
-    fn make_action(
-        store: &ObjectStore,
-        tool: &str,
-        plan_id: NodeId,
-        step_index: usize,
-    ) -> Action {
+    fn make_action(store: &ObjectStore, tool: &str, plan_id: NodeId, step_index: usize) -> Action {
         let action = Action::new(
             tool.into(),
             serde_json::json!({ "path": "src/auth.ts" }),
             String::new(),
             Utc::now(),
-            PlanRef { plan_id, step_index },
+            PlanRef {
+                plan_id,
+                step_index,
+            },
             vec![],
         );
         store.put(&Node::Action(action.clone())).unwrap();
@@ -253,7 +253,11 @@ mod tests {
     ) -> Attribution {
         let attr = Attribution::new(
             action_id,
-            AttributionTarget::LineRange { path: path.into(), start, end },
+            AttributionTarget::LineRange {
+                path: path.into(),
+                start,
+                end,
+            },
             confidence,
             vec![],
             vec![],
@@ -278,12 +282,19 @@ mod tests {
     fn why_full_happy_path() {
         let (store, _dir) = make_store();
 
-        let intent = make_intent(&store, "ACME-411", "Add JWT verification before the user-id lookup");
+        let intent = make_intent(
+            &store,
+            "ACME-411",
+            "Add JWT verification before the user-id lookup",
+        );
         let plan = make_plan(
             &store,
             vec![intent.id.clone()],
             vec![
-                PlanStep { goal: "Read existing auth code".into(), constraints: vec![] },
+                PlanStep {
+                    goal: "Read existing auth code".into(),
+                    constraints: vec![],
+                },
                 PlanStep {
                     goal: "Add JWT verification middleware".into(),
                     constraints: vec!["no async/await".into()],
@@ -293,10 +304,15 @@ mod tests {
         let action = make_action(&store, "edit_file", plan.id.clone(), 1);
         make_attr(&store, action.id.clone(), "src/auth.ts", 40, 55, 1.0);
 
-        let chain = why(&store, "src/auth.ts", 47).unwrap().expect("chain must be found");
+        let chain = why(&store, "src/auth.ts", 47)
+            .unwrap()
+            .expect("chain must be found");
 
         assert_eq!(chain.intents.len(), 1);
-        assert_eq!(chain.intents[0].text, "Add JWT verification before the user-id lookup");
+        assert_eq!(
+            chain.intents[0].text,
+            "Add JWT verification before the user-id lookup"
+        );
         assert_eq!(chain.intents[0].id, intent.id);
         assert_eq!(chain.plan_step_index, 1);
 
@@ -306,7 +322,9 @@ mod tests {
         assert!((chain.confidence() - 1.0).abs() < f32::EPSILON);
         assert!(chain.constraints.is_empty());
 
-        let primary = chain.primary_intent().expect("primary intent must be present");
+        let primary = chain
+            .primary_intent()
+            .expect("primary intent must be present");
         assert_eq!(primary.id, intent.id);
     }
 
@@ -315,12 +333,26 @@ mod tests {
         let (store, _dir) = make_store();
 
         let i1 = make_intent(&store, "ACME-411", "First intent");
-        let p1 = make_plan(&store, vec![i1.id.clone()], vec![PlanStep { goal: "step A".into(), constraints: vec![] }]);
+        let p1 = make_plan(
+            &store,
+            vec![i1.id.clone()],
+            vec![PlanStep {
+                goal: "step A".into(),
+                constraints: vec![],
+            }],
+        );
         let a1 = make_action(&store, "edit_file", p1.id.clone(), 0);
         make_attr(&store, a1.id.clone(), "src/auth.ts", 40, 55, 0.9);
 
         let i2 = make_intent(&store, "ACME-419", "Second intent");
-        let p2 = make_plan(&store, vec![i2.id.clone()], vec![PlanStep { goal: "step B".into(), constraints: vec![] }]);
+        let p2 = make_plan(
+            &store,
+            vec![i2.id.clone()],
+            vec![PlanStep {
+                goal: "step B".into(),
+                constraints: vec![],
+            }],
+        );
         let a2 = make_action(&store, "str_replace", p2.id.clone(), 0);
         make_attr(&store, a2.id.clone(), "src/auth.ts", 44, 50, 0.7);
 
@@ -340,7 +372,10 @@ mod tests {
         let plan = make_plan(
             &store,
             vec![intent.id.clone()],
-            vec![PlanStep { goal: "only step".into(), constraints: vec![] }],
+            vec![PlanStep {
+                goal: "only step".into(),
+                constraints: vec![],
+            }],
         );
         // Action points to step_index=5 but plan has only 1 step
         let action = make_action(&store, "edit_file", plan.id.clone(), 5);
@@ -350,7 +385,11 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(VasariError::PlanStepOutOfBounds { step_index: 5, step_count: 1, .. })
+                Err(VasariError::PlanStepOutOfBounds {
+                    step_index: 5,
+                    step_count: 1,
+                    ..
+                })
             ),
             "expected PlanStepOutOfBounds, got: {result:?}"
         );
@@ -365,7 +404,10 @@ mod tests {
         let plan = make_plan(
             &store,
             vec![i1.id.clone(), i2.id.clone()],
-            vec![PlanStep { goal: "do thing".into(), constraints: vec![] }],
+            vec![PlanStep {
+                goal: "do thing".into(),
+                constraints: vec![],
+            }],
         );
         let action = make_action(&store, "edit_file", plan.id.clone(), 0);
         make_attr(&store, action.id.clone(), "src/lib.rs", 1, 5, 1.0);
@@ -378,7 +420,14 @@ mod tests {
     fn plan_with_zero_intents_succeeds() {
         let (store, _dir) = make_store();
 
-        let plan = make_plan(&store, vec![], vec![PlanStep { goal: "orphan step".into(), constraints: vec![] }]);
+        let plan = make_plan(
+            &store,
+            vec![],
+            vec![PlanStep {
+                goal: "orphan step".into(),
+                constraints: vec![],
+            }],
+        );
         let action = make_action(&store, "edit_file", plan.id.clone(), 0);
         make_attr(&store, action.id.clone(), "src/empty.rs", 1, 1, 1.0);
 
@@ -393,7 +442,11 @@ mod tests {
         let ghost_action_id = NodeId("deadbeef".repeat(8));
         let attr = Attribution::new(
             ghost_action_id,
-            AttributionTarget::LineRange { path: "src/ghost.rs".into(), start: 1, end: 5 },
+            AttributionTarget::LineRange {
+                path: "src/ghost.rs".into(),
+                start: 1,
+                end: 5,
+            },
             1.0,
             vec![],
             vec![],
@@ -402,6 +455,9 @@ mod tests {
 
         // why_all soft-logs NodeNotFound for missing action, returns empty
         let chains = why_all(&store, "src/ghost.rs", 3).unwrap();
-        assert!(chains.is_empty(), "missing action should be soft-logged, not crash");
+        assert!(
+            chains.is_empty(),
+            "missing action should be soft-logged, not crash"
+        );
     }
 }
