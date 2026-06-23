@@ -40,9 +40,7 @@ pub enum IngestEvent {
         timestamp: DateTime<Utc>,
     },
     /// System-level instruction (e.g., CLAUDE.md content, session preamble).
-    SystemInstruction {
-        text: String,
-    },
+    SystemInstruction { text: String },
 }
 
 /// Outcome of a `run_pipeline` call.
@@ -287,12 +285,12 @@ mod tests {
     #[test]
     fn constraint_keywords_in_prompt_create_constraints() {
         let (store, _dir) = make_store();
-        let events = vec![
-            IngestEvent::UserPrompt {
-                text: "You must validate all inputs before writing. Never store passwords in plaintext.".into(),
-                timestamp: Utc::now(),
-            },
-        ];
+        let events = vec![IngestEvent::UserPrompt {
+            text:
+                "You must validate all inputs before writing. Never store passwords in plaintext."
+                    .into(),
+            timestamp: Utc::now(),
+        }];
 
         let summary = run_pipeline(events, &store).unwrap();
         assert!(summary.constraints_created >= 2);
@@ -353,7 +351,10 @@ mod tests {
             },
         ];
         let summary = run_pipeline(events, &store).unwrap();
-        assert_eq!(summary.attributions_created, 0, "Bash tool should not produce attribution");
+        assert_eq!(
+            summary.attributions_created, 0,
+            "Bash tool should not produce attribution"
+        );
     }
 
     #[test]
@@ -385,7 +386,10 @@ mod tests {
         ];
         let summary = run_pipeline(events, &store).unwrap();
         assert_eq!(summary.actions_created, 3);
-        assert_eq!(summary.attributions_created, 2, "only Edit + Write produce attributions");
+        assert_eq!(
+            summary.attributions_created, 2,
+            "only Edit + Write produce attributions"
+        );
     }
 
     #[test]
@@ -432,6 +436,9 @@ mod tests {
             },
         ];
         let summary = run_pipeline(events, &store).unwrap();
-        assert!(summary.constraints_created >= 2, "system instruction constraints should be extracted");
+        assert!(
+            summary.constraints_created >= 2,
+            "system instruction constraints should be extracted"
+        );
     }
 }
