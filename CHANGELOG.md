@@ -53,6 +53,45 @@ Version scheme: `MAJOR.MINOR.PATCH.BUILD` (gstack convention).
 
 ---
 
+## [0.1.1.0] — 2026-06-22
+
+### Added
+
+**vasari-core** (`crates/vasari-core`)
+
+- `vasari_core::why(store, path, line)` — resolve a file:line to the intent chain that produced it.
+  Returns `Option<ResolveChain>` (highest-confidence match), or `None` if no attribution covers
+  that line.
+- `vasari_core::why_all(store, path, line)` — returns all overlapping `ResolveChain` results for
+  cases where multiple agent actions cover the same line range.
+- `ResolveChain` struct: answer-first field layout (`intents`, `plan`, `plan_step_index`, `action`,
+  `attribution`, `constraints`). Convenience methods: `plan_step()`, `confidence()`,
+  `primary_intent()`.
+- `VasariError::PlanStepOutOfBounds` — propagated when an `Action` references a step index
+  beyond `plan.steps.len()`, indicating graph corruption. Error message includes the plan ID,
+  requested index, and actual step count.
+- `AttributionNotFound` error now embeds remediation guidance (`vasari ingest` / `vasari fsck`)
+  so library callers (including future Python/UniFFI bindings) see actionable messages.
+- 7 integration tests in `resolve.rs`: full happy path, empty store, highest-confidence
+  selection, multiple overlapping attributions, out-of-bounds step index, multi-intent plan,
+  zero-intent plan, missing action node soft-log.
+
+### Changed
+
+**vasari** (`crates/vasari`)
+
+- `vasari why` now uses `vasari_core::why_all` and displays results intent-first: the "why"
+  answer (intent text + source + timestamp) leads, followed by the plan step and tool, then
+  confidence. Attribution node IDs are no longer shown in default output.
+- `vasari why --json` flag added: outputs one JSON object per attribution chain on stdout,
+  suitable for piping into dashboards or other tools. Fields: `intent_text`, `intent_source`,
+  `intent_at`, `plan_step_goal`, `plan_step_index`, `plan_step_total`, `action_tool`,
+  `confidence`, `attribution_id`.
+
+[0.1.1.0]: https://github.com/briceicle/vasari/releases/tag/v0.1.1.0
+
+---
+
 ## [0.1.0.0] — 2026-06-22
 
 ### Added

@@ -37,6 +37,18 @@ Known deferred items as of v0.2.0.0.
   Note: no Rust toolchain in the current dev environment — author the workflow file
   and test it via GitHub Actions directly.
 
+## Known bugs (pre-existing, not blocking v0.1.x)
+
+- **`ObjectStore::object_path` panics on NodeIDs shorter than 2 chars** — the index
+  scanner reads raw lines from disk into `NodeId` without length validation; `&s[..2]`
+  panics on short or empty strings. Fix: validate in `object_path`, return
+  `VasariError::InvalidNodeId`. Introduced in v0.1.0.0.
+
+- **`encode_path` encodes `.` the same as `..`** — the guard
+  `".." | "." => "%2E%2E"` maps both dot forms to the same string. A path component
+  `.` should encode as `%2E`. Causes false-positive deduplication of `.` and `..` in
+  index paths. Introduced in v0.1.0.0.
+
 ## Known limitations (not bugs)
 
 - `get()` does not verify content hash on read — silent corruption is possible.
