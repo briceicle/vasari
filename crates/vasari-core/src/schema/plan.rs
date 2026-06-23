@@ -21,13 +21,14 @@ pub struct PlanStep {
 }
 
 impl Plan {
-    pub fn new(
-        intent_ids: Vec<NodeId>,
-        steps: Vec<PlanStep>,
-        parent_ids: Vec<NodeId>,
-    ) -> Self {
+    pub fn new(intent_ids: Vec<NodeId>, steps: Vec<PlanStep>, parent_ids: Vec<NodeId>) -> Self {
         let id = NodeId(node_id(&Self::hash_input(&intent_ids, &steps, &parent_ids)));
-        Self { id, intent_ids, steps, parent_ids }
+        Self {
+            id,
+            intent_ids,
+            steps,
+            parent_ids,
+        }
     }
 
     fn hash_input(

@@ -26,7 +26,13 @@ impl Intent {
             &created_at,
             &parent_ids,
         )));
-        Self { id, source, text, created_at, parent_ids }
+        Self {
+            id,
+            source,
+            text,
+            created_at,
+            parent_ids,
+        }
     }
 
     fn hash_input(
