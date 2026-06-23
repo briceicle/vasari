@@ -17,7 +17,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::{
-    error::{DegradedReason, VasariError},
+    error::VasariError,
     ingest::{IngestAdapter, IngestEvent, IngestSource},
 };
 
@@ -260,7 +260,7 @@ fn is_boilerplate(text: &str) -> bool {
         "proceed", "next", "k", "yep", "yup",
     ];
     let lower = text.trim().to_lowercase();
-    BOILERPLATE.iter().any(|b| *b == lower.as_str())
+    BOILERPLATE.contains(&lower.as_str())
 }
 
 #[cfg(test)]

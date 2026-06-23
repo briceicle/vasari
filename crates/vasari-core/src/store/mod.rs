@@ -209,7 +209,7 @@ fn encode_path(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{Attribution, AttributionTarget, Evidence, Intent, Node};
+    use crate::schema::{Attribution, AttributionTarget, Intent, Node};
 
     #[test]
     fn round_trip_intent() {
@@ -335,7 +335,7 @@ mod tests {
         let attr_id = attr.id.clone();
         // Manually append the same ID twice to simulate re-ingest writing to the index.
         store.put(&Node::Attribution(attr.clone())).unwrap();
-        // Directly append duplicate to the index file.
+        // Directly append duplicate to the index file (filename = "<start>-<end>").
         let encoded = encode_path("src/dup.rs");
         let index_file = dir
             .path()
@@ -343,7 +343,7 @@ mod tests {
             .join("index")
             .join("targets")
             .join(&encoded)
-            .join("1-4294967295");
+            .join("1-100");
         let mut f = std::fs::OpenOptions::new().append(true).open(&index_file).unwrap();
         use std::io::Write;
         writeln!(f, "{}", attr_id.as_str()).unwrap();

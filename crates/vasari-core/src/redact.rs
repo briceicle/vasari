@@ -45,7 +45,7 @@ fn should_redact_token(token: &str) -> bool {
     // Strip surrounding punctuation (quotes, commas) before measuring
     let inner = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_');
     let len = inner.len();
-    if len < MIN_TOKEN_LEN || len > MAX_TOKEN_LEN {
+    if !(MIN_TOKEN_LEN..=MAX_TOKEN_LEN).contains(&len) {
         return false;
     }
     // Git SHAs are 40-char hex — not secrets
