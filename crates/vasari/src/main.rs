@@ -233,36 +233,30 @@ fn cmd_diff(store: &ObjectStore, plan_a_id: &str, plan_b_id: &str) -> Result<()>
     Ok(())
 }
 
+fn parse_ingest_source(input: String) -> IngestSource {
+    if input == "-" {
+        IngestSource::Stdin
+    } else {
+        IngestSource::File(PathBuf::from(input))
+    }
+}
+
 fn cmd_ingest(store: &ObjectStore, cmd: IngestCommands) -> Result<()> {
     use vasari_core::adapters::{claude_code::ClaudeCodeAdapter, otel::OtelGenAiAdapter};
 
-    let (adapter_name, source): (_, IngestSource) = match cmd {
+    let (adapter_name, events) = match cmd {
         IngestCommands::ClaudeCode { input } => {
-            let src = if input == "-" {
-                IngestSource::Stdin
-            } else {
-                IngestSource::File(PathBuf::from(&input))
-            };
-            ("claude-code", src)
+            let events = ClaudeCodeAdapter
+                .parse(parse_ingest_source(input))
+                .with_context(|| "parsing Claude Code session")?;
+            ("claude-code", events)
         }
         IngestCommands::OtelGenai { input } => {
-            let src = if input == "-" {
-                IngestSource::Stdin
-            } else {
-                IngestSource::File(PathBuf::from(&input))
-            };
-            ("otel-genai", src)
+            let events = OtelGenAiAdapter
+                .parse(parse_ingest_source(input))
+                .with_context(|| "parsing OTEL GenAI spans")?;
+            ("otel-genai", events)
         }
-    };
-
-    let events = match adapter_name {
-        "claude-code" => ClaudeCodeAdapter
-            .parse(source)
-            .with_context(|| "parsing Claude Code session")?,
-        "otel-genai" => OtelGenAiAdapter
-            .parse(source)
-            .with_context(|| "parsing OTEL GenAI spans")?,
-        _ => unreachable!(),
     };
 
     let summary = run_pipeline(events, store)
