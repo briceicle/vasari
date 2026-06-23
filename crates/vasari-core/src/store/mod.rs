@@ -199,7 +199,8 @@ fn encode_path(path: &str) -> String {
     // the targets/ subdirectory.
     path.split('/')
         .map(|component| match component {
-            ".." | "." => "%2E%2E".to_string(),
+            ".." => "%2E%2E".to_string(),
+            "." => "%2E".to_string(),
             other => other.replace('%', "%25"),
         })
         .collect::<Vec<_>>()
@@ -369,7 +370,8 @@ mod tests {
     #[test]
     fn encode_path_encodes_single_dot() {
         let encoded = encode_path("./relative.rs");
-        assert!(encoded.contains("%2E%2E"));
+        assert!(encoded.contains("%2E"), "single dot should be percent-encoded");
+        assert!(!encoded.contains(".."), "single dot should not be mistaken for dotdot");
     }
 
     #[test]

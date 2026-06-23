@@ -201,16 +201,19 @@ fn attribution_for_tool(
         return None;
     }
 
+    // Confidence assigned to whole-file attributions — calibrated empirically.
+    const WHOLE_FILE_CONFIDENCE: f32 = 0.7;
+
     Some(Attribution::new(
         action_id.clone(),
         AttributionTarget::LineRange {
             path,
             start: 1,
             // Whole-file sentinel: u32::MAX means "the entire file".
-            // vasari why at any line will match this Attribution.
+            // A 'vasari why' query at any line number will match this Attribution.
             end: u32::MAX,
         },
-        0.7,
+        WHOLE_FILE_CONFIDENCE,
         vec![],
         vec![intent_id.clone()],
     ))
