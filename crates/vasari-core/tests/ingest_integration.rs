@@ -106,7 +106,7 @@ fn golden_otel_ingest_creates_intent() {
     let (store, _dir) = open_store();
 
     let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../tests/fixtures/otel/simple-gen-ai.json");
+        .join("../../tests/fixtures/otel/simple-gen-ai.json");
 
     let events = OtelGenAiAdapter
         .parse(IngestSource::File(fixture))
