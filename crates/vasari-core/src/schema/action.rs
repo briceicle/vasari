@@ -12,12 +12,16 @@ pub struct Action {
     /// Hashed if the args contain sensitive values (e.g., credentials, PII).
     pub args: serde_json::Value,
     /// Human-readable summary of the result — EXCLUDED from content hash.
-    /// This is an annotation, not identity; excluding it prevents confidence
-    /// churn when summaries are recomputed.
     pub result_summary: String,
     pub timestamp: DateTime<Utc>,
     pub plan_ref: PlanRef,
     pub parent_ids: Vec<NodeId>,
+    #[serde(default = "default_schema_version")]
+    pub schema_version: String,
+}
+
+fn default_schema_version() -> String {
+    "1".to_string()
 }
 
 /// Reference to a specific step within a Plan.
@@ -52,6 +56,7 @@ impl Action {
             timestamp,
             plan_ref,
             parent_ids,
+            schema_version: default_schema_version(),
         }
     }
 

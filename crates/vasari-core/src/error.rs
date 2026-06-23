@@ -37,6 +37,7 @@ pub enum DegradedReason {
     UnknownTool(String),
     UnparsableSession { source: String, detail: String },
     UnparsableSpan { span_name: String, detail: String },
+    EmptySession { source: String },
 }
 
 impl std::fmt::Display for DegradedReason {
@@ -50,6 +51,9 @@ impl std::fmt::Display for DegradedReason {
             }
             Self::UnparsableSpan { span_name, detail } => {
                 write!(f, "unparsable span '{span_name}': {detail}")
+            }
+            Self::EmptySession { source } => {
+                write!(f, "no ingest-relevant events found in session: {source}")
             }
         }
     }

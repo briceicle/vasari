@@ -1,15 +1,20 @@
 # TODOS
 
-Known deferred items as of v0.1.0.0.
+Known deferred items as of v0.2.0.0.
 
-## v0.2 targets
+## v0.2 targets — COMPLETED in this release
 
-- [ ] **`vasari ingest --adapter claude-code`** — parse Claude Code session JSONL
-  (`~/.claude/projects/<session>/`) into Intent → Plan → Action → Attribution nodes.
-  Inference rules: §6 of INTENT-SPEC.md.
+- [x] **`vasari ingest claude-code`** — Claude Code session JSONL parsing, implemented in
+  `crates/vasari-core/src/adapters/claude_code.rs`
 
-- [ ] **`vasari ingest --adapter otel-genai`** — parse OTEL GenAI spans (≥ semconv 1.30.0)
-  into the intent graph. Same §6 rules.
+- [x] **`vasari ingest otel-genai`** — OTEL GenAI span parsing (semconv ≥ 1.30.0), two-pass
+  span tree reconstruction, implemented in `crates/vasari-core/src/adapters/otel.rs`
+
+- [x] **`vasari sessions`** / **`vasari files`** — list Intent nodes and attributed files
+
+- [x] **`vasari constrain`** — manually pin constraints with polarity (mandatory | prohibitive)
+
+## v0.3 targets
 
 - [ ] **`vasari verify`** — Sigstore keyless DSSE signing for each node; in-toto v1 Statement
   wrapper. See `docs/why-not-just-in-toto.md`.
@@ -22,12 +27,15 @@ Known deferred items as of v0.1.0.0.
 - [ ] **Attribution corpus** — hand-label 100 lines from a real Claude Code session,
   run `tests/corpus/attribution/run.sh`, confirm ≥80% accuracy ship gate passes.
 
+- [ ] **MCP ingest adapter** — parse MCP tool-call streams into the intent graph (v0.2+ per plan).
+
 ## CI/CD (deferred from v0.1)
 
-- [ ] **GitHub Actions release workflow** — on tag `v*`, run `cargo test`, `cargo clippy`,
-  `cargo build --release`, publish crate to crates.io, create GitHub release with binary.
-  Deferred because cargo/rustup is not available in the current CI environment and the
-  release workflow needs to be authored once it is.
+- [ ] **GitHub Actions workflow** — `cargo test`, `cargo clippy`, `cargo fmt --check` on every
+  push. Separate release workflow: on tag `v*`, build binaries for `aarch64-darwin`,
+  `x86_64-linux`, `aarch64-linux`, publish to crates.io, create GitHub release.
+  Note: no Rust toolchain in the current dev environment — author the workflow file
+  and test it via GitHub Actions directly.
 
 ## Known bugs (pre-existing, not blocking v0.1.x)
 
@@ -44,7 +52,29 @@ Known deferred items as of v0.1.0.0.
 ## Known limitations (not bugs)
 
 - `get()` does not verify content hash on read — silent corruption is possible.
-  `vasari fsck` is the recovery path. Hash verification on `get()` deferred to v0.2.
+  `vasari fsck` is the recovery path. Hash verification on `get()` deferred to v0.3.
 
 - `NodeId` inner String is public — callers can construct invalid IDs.
-  Validation at ingest boundary deferred until adapters ship.
+  `object_path()` now validates hex format (v0.2 fix); full newtype enforcement deferred to v0.3.
+
+- Shannon entropy redaction heuristic may false-positive on some legitimate high-entropy tokens
+  (e.g., base64-encoded binary data in prompts). Tuning deferred until we have real session corpus data.
+
+- Claude Code JSONL format is undocumented and may change. The adapter is snapshot-tested
+  against `tests/fixtures/claude_code/`; a format change will fail the integration tests loudly.
+
+- OTEL adapter span walk is one level deep — root → child only. Grandchild spans (root → child →
+  grandchild) are silently dropped; they are neither children of a root nor orphans (their parent
+  exists in `by_span_id`). In practice, gen_ai traces are shallow, but deep tool-call trees would
+  lose the leaf spans. Fix: recurse into each child's children in `parse_otlp_json`.
+
+- OTEL adapter child walk is O(roots × spans) — for each root span it scans all spans for direct
+  children. For large exports this degrades; a `children_of: HashMap<&str, Vec<&Value>>` built in
+  Pass 1 would make it O(spans). Acceptable at current scale.
+
+- OTEL adapter reads the entire file into memory (`read_to_string`). A very large OTLP JSON export
+  could cause OOM. Streaming JSON parsing deferred until there is evidence of large-file use.
+
+- `parse_target` in `main.rs` (used by `vasari why`) has no unit tests for edge cases: empty
+  string, missing colon, line=0, line number overflow, path containing colons. Low risk for a CLI
+  but worth covering before adding any programmatic consumers.
