@@ -95,7 +95,7 @@ pub fn run_pipeline(
                 result_summary,
                 timestamp,
             } => {
-                tool_calls.push((name, args, redact(&result_summary), timestamp));
+                tool_calls.push((name, redact_json(args), redact(&result_summary), timestamp));
             }
             IngestEvent::SystemInstruction { text } => {
                 system_instructions.push(redact(&text));
@@ -178,6 +178,19 @@ pub fn run_pipeline(
     }
 
     Ok(summary)
+}
+
+/// Recursively redact all string leaf values in a JSON value.
+/// Applied to tool call args before they are stored in Action nodes.
+fn redact_json(value: Value) -> Value {
+    match value {
+        Value::String(s) => Value::String(redact(&s)),
+        Value::Array(arr) => Value::Array(arr.into_iter().map(redact_json).collect()),
+        Value::Object(map) => {
+            Value::Object(map.into_iter().map(|(k, v)| (k, redact_json(v))).collect())
+        }
+        other => other,
+    }
 }
 
 /// Produce an Attribution node for Edit/Write tool calls.
@@ -373,6 +386,37 @@ mod tests {
         let summary = run_pipeline(events, &store).unwrap();
         assert_eq!(summary.actions_created, 3);
         assert_eq!(summary.attributions_created, 2, "only Edit + Write produce attributions");
+    }
+
+    #[test]
+    fn tool_call_args_are_redacted_before_storage() {
+        let (store, _dir) = make_store();
+        let secret = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890abcdef";
+        let events = vec![
+            IngestEvent::UserPrompt {
+                text: "write the config".into(),
+                timestamp: Utc::now(),
+            },
+            IngestEvent::ToolCall {
+                name: "Write".into(),
+                args: json!({ "file_path": "config.toml", "new_content": secret }),
+                result_summary: String::new(),
+                timestamp: Utc::now(),
+            },
+        ];
+        run_pipeline(events, &store).unwrap();
+
+        // Retrieve all Action nodes and verify the secret is not present in args.
+        let nodes = store.iter_all().unwrap();
+        for node in nodes {
+            if let crate::Node::Action(action) = node {
+                let serialized = serde_json::to_string(&action.args).unwrap();
+                assert!(
+                    !serialized.contains("sk-ant-api03-"),
+                    "Anthropic API key must not survive in stored Action args"
+                );
+            }
+        }
     }
 
     #[test]

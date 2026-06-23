@@ -43,10 +43,26 @@ Known deferred items as of v0.2.0.0.
   `vasari fsck` is the recovery path. Hash verification on `get()` deferred to v0.3.
 
 - `NodeId` inner String is public — callers can construct invalid IDs.
-  Validation strengthened at ingest boundary; full newtype enforcement deferred to v0.3.
+  `object_path()` now validates hex format (v0.2 fix); full newtype enforcement deferred to v0.3.
 
 - Shannon entropy redaction heuristic may false-positive on some legitimate high-entropy tokens
   (e.g., base64-encoded binary data in prompts). Tuning deferred until we have real session corpus data.
 
 - Claude Code JSONL format is undocumented and may change. The adapter is snapshot-tested
   against `tests/fixtures/claude_code/`; a format change will fail the integration tests loudly.
+
+- OTEL adapter span walk is one level deep — root → child only. Grandchild spans (root → child →
+  grandchild) are silently dropped; they are neither children of a root nor orphans (their parent
+  exists in `by_span_id`). In practice, gen_ai traces are shallow, but deep tool-call trees would
+  lose the leaf spans. Fix: recurse into each child's children in `parse_otlp_json`.
+
+- OTEL adapter child walk is O(roots × spans) — for each root span it scans all spans for direct
+  children. For large exports this degrades; a `children_of: HashMap<&str, Vec<&Value>>` built in
+  Pass 1 would make it O(spans). Acceptable at current scale.
+
+- OTEL adapter reads the entire file into memory (`read_to_string`). A very large OTLP JSON export
+  could cause OOM. Streaming JSON parsing deferred until there is evidence of large-file use.
+
+- `parse_target` in `main.rs` (used by `vasari why`) has no unit tests for edge cases: empty
+  string, missing colon, line=0, line number overflow, path containing colons. Low risk for a CLI
+  but worth covering before adding any programmatic consumers.
