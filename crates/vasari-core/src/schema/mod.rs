@@ -6,7 +6,7 @@ mod plan;
 
 pub use action::{Action, PlanRef};
 pub use attribution::{Attribution, AttributionTarget, Evidence, EvidenceKind};
-pub use constraint::Constraint;
+pub use constraint::{Constraint, ConstraintPolarity};
 pub use intent::Intent;
 pub use plan::{Plan, PlanStep};
 

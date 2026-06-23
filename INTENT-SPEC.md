@@ -35,11 +35,17 @@ Scheme (key-sorted, no whitespace, specific number and unicode handling).
 Fields excluded from the content hash (annotations, not identity):
 - `Action.result_summary`
 - `Attribution.confidence`
+- `*.schema_version` (all five node types)
 
 Rationale: these fields may be updated without changing what the node *is*
-(e.g., confidence is recalibrated, summaries are recomputed). Excluding them
-prevents churn and ensures the same logical action or attribution gets the same
-ID across recalibration runs.
+(e.g., confidence is recalibrated, summaries are recomputed, schema version
+advances). Excluding them prevents churn and ensures the same logical action or
+attribution gets the same ID across recalibration runs and schema upgrades.
+
+`schema_version` is stored on every node as an annotation so that readers can
+detect format drift, but it is explicitly excluded from the hash — a node's
+identity does not change when the schema that describes it is versioned.
+Current value: `"1"` for all node types in v0.1.
 
 ## §4 Storage
 
@@ -79,7 +85,10 @@ OTEL GenAI spans don't carry `Plan` or `Constraint` natively. Synthesis rules:
 
 Anything not synthesizable lands in `evidence[]` with `kind: inferred`.
 
-Pinned semconv version: *TBD at v0.1 cut (target: ≥ 1.30.0 stable)*.
+Pinned semconv version: **≥ 1.30.0** (stable). Earlier versions lack the
+`gen_ai.operation.name` attribute that the adapter uses to identify GenAI spans.
+The adapter will emit no events (empty output, no error) for span exports that
+pre-date 1.30.0 `gen_ai.*` conventions.
 
 ## §7 Signing (opt-in)
 

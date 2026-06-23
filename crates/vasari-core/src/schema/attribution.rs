@@ -10,11 +10,16 @@ pub struct Attribution {
     pub action_id: NodeId,
     pub target: AttributionTarget,
     /// Confidence that this action produced this target. 0.0–1.0.
-    /// EXCLUDED from content hash — it's a computed annotation, not identity.
-    /// Excluding it prevents churn when the attribution engine is recalibrated.
+    /// EXCLUDED from content hash — computed annotation, not identity.
     pub confidence: f32,
     pub evidence: Vec<Evidence>,
     pub parent_ids: Vec<NodeId>,
+    #[serde(default = "default_schema_version")]
+    pub schema_version: String,
+}
+
+fn default_schema_version() -> String {
+    "1".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +57,7 @@ impl Attribution {
         parent_ids: Vec<NodeId>,
     ) -> Self {
         let id = NodeId(node_id(&Self::hash_input(&action_id, &target, &parent_ids)));
-        Self { id, action_id, target, confidence, evidence, parent_ids }
+        Self { id, action_id, target, confidence, evidence, parent_ids, schema_version: default_schema_version() }
     }
 
     /// confidence and evidence are intentionally excluded — confidence is a computed

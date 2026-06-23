@@ -15,18 +15,35 @@ pub struct Intent {
     pub created_at: DateTime<Utc>,
     /// Empty for root intents; one prior Intent ID for amendments.
     pub parent_ids: Vec<NodeId>,
+    /// Schema version. Stored in JSON but excluded from content hash (annotation).
+    #[serde(default = "default_schema_version")]
+    pub schema_version: String,
+}
+
+fn default_schema_version() -> String {
+    "1".to_string()
 }
 
 impl Intent {
     pub fn new(source: String, text: String, parent_ids: Vec<NodeId>) -> Self {
-        let created_at = Utc::now();
+        Self::new_at(source, text, Utc::now(), parent_ids)
+    }
+
+    /// Create an Intent with an explicit timestamp — use this during ingest so the
+    /// content hash is stable relative to the session's actual start time.
+    pub fn new_at(
+        source: String,
+        text: String,
+        created_at: DateTime<Utc>,
+        parent_ids: Vec<NodeId>,
+    ) -> Self {
         let id = NodeId(node_id(&Self::hash_input(
             &source,
             &text,
             &created_at,
             &parent_ids,
         )));
-        Self { id, source, text, created_at, parent_ids }
+        Self { id, source, text, created_at, parent_ids, schema_version: default_schema_version() }
     }
 
     fn hash_input(
@@ -64,6 +81,7 @@ mod tests {
             text: "Add JWT verification".into(),
             created_at: ts,
             parent_ids: parents.clone(),
+            schema_version: "1".into(),
         };
         let b = Intent {
             id: NodeId(node_id(&Intent::hash_input(
@@ -76,6 +94,7 @@ mod tests {
             text: "Add JWT verification".into(),
             created_at: ts,
             parent_ids: parents,
+            schema_version: "1".into(),
         };
         assert_eq!(a.id, b.id);
     }
