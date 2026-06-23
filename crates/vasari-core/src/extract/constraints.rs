@@ -136,4 +136,13 @@ mod tests {
         assert!(!cs.is_empty());
         assert_eq!(cs[0].derived_from, derived);
     }
+
+    #[test]
+    fn sentence_at_eof_without_trailing_whitespace_is_extracted() {
+        // The sentence-split regex matches `[.!?]\s+` — a sentence ending at EOF
+        // (no trailing whitespace after the period) must still be captured.
+        let text = "You must validate all inputs before writing";
+        let cs = extract_constraints(text, dummy_id(), vec![]);
+        assert_eq!(cs.len(), 1, "sentence without trailing period should produce one constraint");
+    }
 }

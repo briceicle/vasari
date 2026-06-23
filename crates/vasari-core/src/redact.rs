@@ -3,13 +3,15 @@ use regex::Regex;
 
 static SECRET_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     vec![
-        // OpenAI API keys (sk- followed by alphanumeric only)
-        Regex::new(r"sk-[A-Za-z0-9]{20,}").unwrap(),
-        // Anthropic API keys (sk-ant-api03-... format; hyphens in body)
+        // Anthropic API keys (sk-ant-api03-... format; hyphens in body — must match before generic sk-)
         Regex::new(r"sk-ant-[A-Za-z0-9\-]{10,}").unwrap(),
+        // OpenAI API keys (sk- and sk-proj- formats)
+        Regex::new(r"sk-proj-[A-Za-z0-9\-_]{20,}").unwrap(),
+        Regex::new(r"sk-[A-Za-z0-9]{20,}").unwrap(),
         // AWS access key IDs
         Regex::new(r"AKIA[A-Z0-9]{16}").unwrap(),
-        // GitHub personal access tokens (classic and fine-grained)
+        // GitHub personal access tokens (classic, fine-grained, and github_pat_ formats)
+        Regex::new(r"github_pat_[A-Za-z0-9_]{20,}").unwrap(),
         Regex::new(r"gh[pousr]_[A-Za-z0-9]{36,}").unwrap(),
         // Generic Bearer tokens
         Regex::new(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]{20,}").unwrap(),
@@ -179,9 +181,34 @@ mod tests {
         let token = "xK9mP2qRvL4nJwY8aB3cD5eF1gH0iZQs";
         let text = format!("token {token}");
         let result = redact(&text);
-        // At 33 chars, if entropy > 4.5, it should be redacted
-        // We assert it doesn't crash and produces some output
-        assert!(!result.is_empty());
+        assert!(result.contains(REDACTED), "high-entropy token should be redacted");
+        assert!(!result.contains(token), "original token should not appear in output");
+    }
+
+    #[test]
+    fn redacts_openai_proj_key() {
+        let token = "sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890abcdef";
+        let text = format!("key={token}");
+        let result = redact(&text);
+        assert!(result.contains(REDACTED), "OpenAI sk-proj- key should be redacted");
+        assert!(!result.contains("sk-proj-"));
+    }
+
+    #[test]
+    fn redacts_github_fine_grained_pat() {
+        let token = "github_pat_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ab";
+        let text = format!("token={token}");
+        let result = redact(&text);
+        assert!(result.contains(REDACTED), "github_pat_ token should be redacted");
+        assert!(!result.contains("github_pat_"));
+    }
+
+    #[test]
+    fn redacts_key_attached_to_equals_sign() {
+        // Secret not space-delimited — attached to `key=` prefix
+        let text = "OPENAI_KEY=sk-abcdefghijklmnopqrstuvwxyz1234567890AB";
+        let result = redact(&text);
+        assert!(result.contains(REDACTED), "key attached to = should be redacted by regex pass");
     }
 
     #[test]

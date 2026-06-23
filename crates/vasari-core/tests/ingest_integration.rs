@@ -83,6 +83,11 @@ fn ingest_is_idempotent() {
         run_pipeline(events, &store).expect("pipeline should complete");
     }
 
+    // Verify that re-ingesting the same session doesn't create a second Intent.
+    let nodes = store.iter_all().unwrap();
+    let intent_count = nodes.iter().filter(|n| matches!(n, Node::Intent(_))).count();
+    assert_eq!(intent_count, 1, "two ingest runs of the same session should produce exactly one Intent");
+
     let attr_ids = store
         .lookup_attributions("src/auth.rs", 1)
         .expect("lookup should not error");
