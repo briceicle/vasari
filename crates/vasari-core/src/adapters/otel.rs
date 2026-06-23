@@ -416,8 +416,8 @@ mod tests {
 
     #[test]
     fn extract_attr_value_double() {
-        let val = serde_json::json!({"doubleValue": 3.14});
-        assert_eq!(extract_attr_value(&val), "3.14");
+        let val = serde_json::json!({"doubleValue": 2.5});
+        assert_eq!(extract_attr_value(&val), "2.5");
     }
 
     #[test]

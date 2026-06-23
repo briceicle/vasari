@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn redacts_bearer_token() {
         let text = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9abcdef";
-        let result = redact(&text);
+        let result = redact(text);
         assert!(result.contains(REDACTED), "Bearer token should be redacted");
     }
 
@@ -225,7 +225,7 @@ mod tests {
     fn redacts_key_attached_to_equals_sign() {
         // Secret not space-delimited — attached to `key=` prefix
         let text = "OPENAI_KEY=sk-abcdefghijklmnopqrstuvwxyz1234567890AB";
-        let result = redact(&text);
+        let result = redact(text);
         assert!(
             result.contains(REDACTED),
             "key attached to = should be redacted by regex pass"
