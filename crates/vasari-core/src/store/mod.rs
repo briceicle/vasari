@@ -35,7 +35,7 @@ impl ObjectStore {
     /// Write a node to the object store. Idempotent: re-writing the same ID is a no-op.
     pub fn put(&self, node: &Node) -> Result<NodeId, VasariError> {
         let id = node.id();
-        let (dir, file) = self.object_path(id);
+        let (dir, file) = self.object_path(id)?;
         if file.exists() {
             return Ok(id.clone());
         }
@@ -56,7 +56,7 @@ impl ObjectStore {
 
     /// Read a node by ID. Returns None if not present.
     pub fn get(&self, id: &NodeId) -> Result<Option<Node>, VasariError> {
-        let (_, file) = self.object_path(id);
+        let (_, file) = self.object_path(id)?;
         if !file.exists() {
             return Ok(None);
         }
@@ -93,7 +93,11 @@ impl ObjectStore {
                     if line >= start && line <= end {
                         let content = std::fs::read_to_string(entry.path())?;
                         for id_str in content.lines() {
-                            if !id_str.is_empty() {
+                            // Validate hex format before accepting IDs from index files.
+                            if !id_str.is_empty()
+                                && id_str.len() >= 4
+                                && id_str.chars().all(|c| c.is_ascii_hexdigit())
+                            {
                                 ids.push(NodeId(id_str.to_string()));
                             }
                         }
@@ -121,8 +125,11 @@ impl ObjectStore {
                 let obj_entry = obj_entry?;
                 let suffix = obj_entry.file_name().to_string_lossy().to_string();
                 let id = NodeId(format!("{prefix}{suffix}"));
-                if let Some(node) = self.get(&id)? {
-                    nodes.push(node);
+                // Skip non-hex entries (e.g. .DS_Store or injected names).
+                match self.get(&id) {
+                    Ok(Some(node)) => nodes.push(node),
+                    Ok(None) | Err(VasariError::InvalidNodeId(_)) => continue,
+                    Err(e) => return Err(e),
                 }
             }
         }
@@ -150,20 +157,28 @@ impl ObjectStore {
                     prefix.to_string_lossy(),
                     suffix.to_string_lossy()
                 ));
-                if let Some(Node::Attribution(attr)) = self.get(&id)? {
-                    self.index_attribution(&attr)?;
-                    count += 1;
+                // Skip non-hex entries (defense-in-depth against injected names).
+                match self.get(&id) {
+                    Ok(Some(Node::Attribution(attr))) => {
+                        self.index_attribution(&attr)?;
+                        count += 1;
+                    }
+                    Ok(_) | Err(VasariError::InvalidNodeId(_)) => continue,
+                    Err(e) => return Err(e),
                 }
             }
         }
         Ok(count)
     }
 
-    fn object_path(&self, id: &NodeId) -> (PathBuf, PathBuf) {
+    fn object_path(&self, id: &NodeId) -> Result<(PathBuf, PathBuf), VasariError> {
         let s = id.as_str();
+        if s.len() < 4 || !s.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(VasariError::InvalidNodeId(s.to_string()));
+        }
         let dir = self.root.join("objects").join(&s[..2]);
         let file = dir.join(&s[2..]);
-        (dir, file)
+        Ok((dir, file))
     }
 
     fn index_attribution(&self, attr: &Attribution) -> Result<(), VasariError> {
