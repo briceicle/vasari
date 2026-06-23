@@ -70,13 +70,13 @@ impl ObjectStore {
 
     /// Look up attribution node IDs for a specific file:line target.
     /// The index is rebuilt by `vasari fsck` if stale.
-    pub fn lookup_attributions(
-        &self,
-        path: &str,
-        line: u32,
-    ) -> Result<Vec<NodeId>, VasariError> {
+    pub fn lookup_attributions(&self, path: &str, line: u32) -> Result<Vec<NodeId>, VasariError> {
         // Scan all index entries for this path and find ranges covering `line`.
-        let path_dir = self.root.join("index").join("targets").join(encode_path(path));
+        let path_dir = self
+            .root
+            .join("index")
+            .join("targets")
+            .join(encode_path(path));
         if !path_dir.exists() {
             return Ok(vec![]);
         }
@@ -87,9 +87,7 @@ impl ObjectStore {
             let name_str = name.to_string_lossy();
             // Index file names: "<start>-<end>"
             if let Some((start_s, end_s)) = name_str.split_once('-') {
-                if let (Ok(start), Ok(end)) =
-                    (start_s.parse::<u32>(), end_s.parse::<u32>())
-                {
+                if let (Ok(start), Ok(end)) = (start_s.parse::<u32>(), end_s.parse::<u32>()) {
                     if line >= start && line <= end {
                         let content = std::fs::read_to_string(entry.path())?;
                         for id_str in content.lines() {

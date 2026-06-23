@@ -8,10 +8,16 @@ pub enum VasariError {
     HashMismatch { expected: String, actual: String },
     #[error("invalid node id: {0}")]
     InvalidNodeId(String),
-    #[error("no attribution found for {path}:{line}")]
+    #[error("no attribution found for {path}:{line} — run `vasari ingest` to populate the graph, or `vasari fsck` to rebuild the index")]
     AttributionNotFound { path: String, line: u32 },
     #[error("plan not found: {0}")]
     PlanNotFound(String),
+    #[error("plan step index {step_index} out of bounds for plan {plan_id} ({step_count} steps) — graph may be corrupt; run `vasari fsck`")]
+    PlanStepOutOfBounds {
+        plan_id: String,
+        step_index: usize,
+        step_count: usize,
+    },
     #[error("degraded ingest: {0}")]
     Degraded(DegradedReason),
     #[error("io: {0}")]

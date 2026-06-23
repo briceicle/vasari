@@ -43,7 +43,14 @@ impl Intent {
             &created_at,
             &parent_ids,
         )));
-        Self { id, source, text, created_at, parent_ids, schema_version: default_schema_version() }
+        Self {
+            id,
+            source,
+            text,
+            created_at,
+            parent_ids,
+            schema_version: default_schema_version(),
+        }
     }
 
     fn hash_input(
