@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use vasari_core::{Node, ObjectStore};
+use vasari_core::{why_all, Node, ObjectStore};
 
 #[derive(Parser)]
 #[command(
@@ -26,6 +26,9 @@ enum Commands {
     Why {
         /// File path and line number (e.g., src/auth.ts:47)
         target: String,
+        /// Output as newline-delimited JSON (one object per attribution chain)
+        #[arg(long)]
+        json: bool,
     },
     /// Show where two plans diverged.
     ///
@@ -58,7 +61,7 @@ fn main() -> Result<()> {
         .with_context(|| format!("opening .vasari store at {}", repo_root.display()))?;
 
     match cli.command {
-        Commands::Why { target } => cmd_why(&store, &target),
+        Commands::Why { target, json } => cmd_why(&store, &target, json),
         Commands::Diff { plan_a, plan_b } => cmd_diff(&store, &plan_a, &plan_b),
         Commands::Ingest { adapter, input } => cmd_ingest(&store, &adapter, &input),
         Commands::Verify => cmd_verify(),
@@ -66,68 +69,76 @@ fn main() -> Result<()> {
     }
 }
 
-fn cmd_why(store: &ObjectStore, target: &str) -> Result<()> {
+fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
     let (path, line) = parse_target(target)?;
 
-    let attr_ids = store
-        .lookup_attributions(&path, line)
-        .with_context(|| format!("looking up attributions for {path}:{line}"))?;
+    let chains = why_all(store, &path, line)
+        .with_context(|| format!("resolving {path}:{line}"))?;
 
-    if attr_ids.is_empty() {
+    if chains.is_empty() {
         println!("No attribution found for {path}:{line}");
         println!("Run `vasari ingest` first to populate the graph.");
         return Ok(());
     }
 
-    // Walk Attribution → Action → Plan (at step_index) → Intent.
-    for attr_id in &attr_ids {
-        let Some(Node::Attribution(attr)) = store.get(attr_id)? else {
-            eprintln!("warn: attribution node {} not found in object store", attr_id);
-            continue;
-        };
+    if json {
+        for chain in &chains {
+            let obj = serde_json::json!({
+                "target": format!("{path}:{line}"),
+                "intent_text": chain.primary_intent().map(|i| &i.text),
+                "intent_source": chain.primary_intent().map(|i| &i.source),
+                "intent_at": chain.primary_intent().map(|i| i.created_at.to_rfc3339()),
+                "plan_step_goal": chain.plan_step().map(|s| &s.goal),
+                "plan_step_index": chain.plan_step_index + 1,
+                "plan_step_total": chain.plan.steps.len(),
+                "action_tool": chain.action.tool,
+                "confidence": chain.confidence(),
+                "attribution_id": chain.attribution.id.as_str(),
+            });
+            println!("{}", serde_json::to_string(&obj)?);
+        }
+        return Ok(());
+    }
 
-        println!("Attribution: {}", attr.id);
-        println!("  Confidence: {:.2}", attr.confidence);
+    if chains.len() > 1 {
+        println!("{path}:{line} — {} attributions\n", chains.len());
+    }
 
-        let Some(Node::Action(action)) = store.get(&attr.action_id)? else {
-            println!("  Action: {} (not in store)", attr.action_id);
-            continue;
-        };
-
-        println!("  Action: {} (tool: {})", action.id, action.tool);
-        if !action.result_summary.is_empty() {
-            println!("  Result: {}", action.result_summary);
+    for (i, chain) in chains.iter().enumerate() {
+        if chains.len() > 1 {
+            println!("[{}]", i + 1);
         }
 
-        let Some(Node::Plan(plan)) =
-            store.get(&action.plan_ref.plan_id)?
-        else {
-            println!("  Plan: {} (not in store)", action.plan_ref.plan_id);
-            continue;
-        };
+        // Lead with the intent — the answer to "why".
+        match chain.primary_intent() {
+            Some(intent) => {
+                println!("{}", intent.text);
+                println!("  from  {} · {}", intent.source, intent.created_at.format("%Y-%m-%d %H:%M UTC"));
+            }
+            None => {
+                println!("(orphan plan — no intent recorded)");
+            }
+        }
 
-        let step = plan.steps.get(action.plan_ref.step_index);
-        if let Some(step) = step {
+        // Plan step context.
+        if let Some(step) = chain.plan_step() {
             println!(
-                "  Plan step {}/{}: {}",
-                action.plan_ref.step_index + 1,
-                plan.steps.len(),
-                step.goal
+                "  via   {} · step {}/{} · {}",
+                chain.action.tool,
+                chain.plan_step_index + 1,
+                chain.plan.steps.len(),
+                step.goal,
             );
+        } else {
+            println!("  via   {}", chain.action.tool);
         }
 
-        for intent_id in &plan.intent_ids {
-            let Some(Node::Intent(intent)) = store.get(intent_id)? else {
-                println!("  Intent: {} (not in store)", intent_id);
-                continue;
-            };
+        // Confidence with evidence kind hint.
+        println!("  conf  {:.2}", chain.confidence());
+
+        if chains.len() > 1 {
             println!();
-            println!("Intent: {}", intent.id);
-            println!("  Source: {}", intent.source);
-            println!("  Text:   {}", intent.text);
-            println!("  At:     {}", intent.created_at.format("%Y-%m-%d %H:%M UTC"));
         }
-        println!();
     }
 
     Ok(())
@@ -246,5 +257,8 @@ fn parse_target(target: &str) -> Result<(String, u32)> {
     let line = line_str
         .parse::<u32>()
         .with_context(|| format!("line number must be a positive integer, got '{line_str}'"))?;
+    if line == 0 {
+        anyhow::bail!("line number must be a positive integer (1-indexed), got '0'");
+    }
     Ok((path.to_string(), line))
 }
