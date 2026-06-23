@@ -101,7 +101,32 @@ impl ObjectStore {
                 }
             }
         }
+        ids.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        ids.dedup();
         Ok(ids)
+    }
+
+    /// Iterate all nodes in the object store. Used by `vasari sessions` and `vasari files`.
+    /// Walks the objects/ directory; no ordering guarantee.
+    pub fn iter_all(&self) -> Result<Vec<Node>, VasariError> {
+        let objects_dir = self.root.join("objects");
+        if !objects_dir.exists() {
+            return Ok(vec![]);
+        }
+        let mut nodes = Vec::new();
+        for prefix_entry in std::fs::read_dir(&objects_dir)? {
+            let prefix_entry = prefix_entry?;
+            let prefix = prefix_entry.file_name().to_string_lossy().to_string();
+            for obj_entry in std::fs::read_dir(prefix_entry.path())? {
+                let obj_entry = obj_entry?;
+                let suffix = obj_entry.file_name().to_string_lossy().to_string();
+                let id = NodeId(format!("{prefix}{suffix}"));
+                if let Some(node) = self.get(&id)? {
+                    nodes.push(node);
+                }
+            }
+        }
+        Ok(nodes)
     }
 
     /// Rebuild all indexes from the object store. Called by `vasari fsck`.
@@ -232,5 +257,132 @@ mod tests {
         assert!(found.contains(&attr_id));
         let not_found = store.lookup_attributions("src/auth.ts", 60).unwrap();
         assert!(not_found.is_empty());
+    }
+
+    #[test]
+    fn iter_all_on_empty_store_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).unwrap();
+        let nodes = store.iter_all().unwrap();
+        assert!(nodes.is_empty());
+    }
+
+    #[test]
+    fn iter_all_returns_all_stored_nodes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).unwrap();
+        let i1 = Intent::new("s1".into(), "first intent".into(), vec![]);
+        let i2 = Intent::new("s2".into(), "second intent".into(), vec![]);
+        store.put(&Node::Intent(i1.clone())).unwrap();
+        store.put(&Node::Intent(i2.clone())).unwrap();
+        let nodes = store.iter_all().unwrap();
+        assert_eq!(nodes.len(), 2);
+    }
+
+    #[test]
+    fn rebuild_index_restores_attribution_lookup() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).unwrap();
+        let action_id = NodeId("deadbeef".repeat(8));
+        let attr = Attribution::new(
+            action_id,
+            AttributionTarget::LineRange {
+                path: "src/lib.rs".into(),
+                start: 1,
+                end: u32::MAX,
+            },
+            0.9,
+            vec![],
+            vec![],
+        );
+        let attr_id = attr.id.clone();
+        store.put(&Node::Attribution(attr)).unwrap();
+
+        // Wipe and rebuild the index.
+        let index_dir = dir.path().join(".vasari").join("index").join("targets");
+        std::fs::remove_dir_all(&index_dir).unwrap();
+        std::fs::create_dir_all(&index_dir).unwrap();
+
+        // Lookup should return empty now (index gone).
+        let before = store.lookup_attributions("src/lib.rs", 42).unwrap();
+        assert!(before.is_empty());
+
+        // Rebuild.
+        let count = store.rebuild_index().unwrap();
+        assert_eq!(count, 1);
+
+        // Lookup should work again.
+        let after = store.lookup_attributions("src/lib.rs", 42).unwrap();
+        assert!(after.contains(&attr_id));
+    }
+
+    #[test]
+    fn lookup_attributions_deduplicates_on_re_ingest() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).unwrap();
+        let action_id = NodeId("deadbeef".repeat(8));
+        let attr = Attribution::new(
+            action_id,
+            AttributionTarget::LineRange {
+                path: "src/dup.rs".into(),
+                start: 1,
+                end: 100,
+            },
+            1.0,
+            vec![],
+            vec![],
+        );
+        let attr_id = attr.id.clone();
+        // Manually append the same ID twice to simulate re-ingest writing to the index.
+        store.put(&Node::Attribution(attr.clone())).unwrap();
+        // Directly append duplicate to the index file.
+        let encoded = encode_path("src/dup.rs");
+        let index_file = dir
+            .path()
+            .join(".vasari")
+            .join("index")
+            .join("targets")
+            .join(&encoded)
+            .join("1-4294967295");
+        let mut f = std::fs::OpenOptions::new().append(true).open(&index_file).unwrap();
+        use std::io::Write;
+        writeln!(f, "{}", attr_id.as_str()).unwrap();
+
+        let found = store.lookup_attributions("src/dup.rs", 50).unwrap();
+        assert_eq!(found.len(), 1, "dedup-on-read should remove the duplicate");
+    }
+
+    #[test]
+    fn encode_path_encodes_slashes() {
+        let encoded = encode_path("src/auth/mod.rs");
+        assert!(!encoded.contains('/'));
+        assert!(encoded.contains("%2F"));
+    }
+
+    #[test]
+    fn encode_path_encodes_dotdot() {
+        let encoded = encode_path("../escape/path.rs");
+        assert!(!encoded.contains(".."));
+        assert!(encoded.contains("%2E%2E"));
+    }
+
+    #[test]
+    fn encode_path_encodes_single_dot() {
+        let encoded = encode_path("./relative.rs");
+        assert!(encoded.contains("%2E%2E"));
+    }
+
+    #[test]
+    fn encode_path_encodes_percent() {
+        let encoded = encode_path("src/100%done.rs");
+        assert!(encoded.contains("%25"));
+    }
+
+    #[test]
+    fn lookup_attributions_returns_empty_for_unknown_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).unwrap();
+        let result = store.lookup_attributions("nonexistent/file.rs", 1).unwrap();
+        assert!(result.is_empty());
     }
 }
