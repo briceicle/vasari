@@ -33,10 +33,7 @@ enum Commands {
     /// Show where two plans diverged.
     ///
     /// Example: vasari diff plan-a plan-b
-    Diff {
-        plan_a: String,
-        plan_b: String,
-    },
+    Diff { plan_a: String, plan_b: String },
     /// Ingest an agent session into the Vasari graph.
     Ingest {
         /// Adapter to use: claude-code | otel-genai
@@ -72,8 +69,7 @@ fn main() -> Result<()> {
 fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
     let (path, line) = parse_target(target)?;
 
-    let chains = why_all(store, &path, line)
-        .with_context(|| format!("resolving {path}:{line}"))?;
+    let chains = why_all(store, &path, line).with_context(|| format!("resolving {path}:{line}"))?;
 
     if chains.is_empty() {
         println!("No attribution found for {path}:{line}");
@@ -113,7 +109,11 @@ fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
         match chain.primary_intent() {
             Some(intent) => {
                 println!("{}", intent.text);
-                println!("  from  {} · {}", intent.source, intent.created_at.format("%Y-%m-%d %H:%M UTC"));
+                println!(
+                    "  from  {} · {}",
+                    intent.source,
+                    intent.created_at.format("%Y-%m-%d %H:%M UTC")
+                );
             }
             None => {
                 println!("(orphan plan — no intent recorded)");
@@ -173,20 +173,14 @@ fn cmd_diff(store: &ObjectStore, plan_a_id: &str, plan_b_id: &str) -> Result<()>
                     || b.goal.contains(&a.goal as &str);
                 if !goals_match {
                     if !diverged {
-                        println!(
-                            "Plans diverge at step {} (1-indexed):",
-                            i + 1
-                        );
+                        println!("Plans diverge at step {} (1-indexed):", i + 1);
                         diverged = true;
                     }
                     println!("  A step {}: {}", i + 1, a.goal);
                     println!("  B step {}: {}", i + 1, b.goal);
                 } else if a.constraints != b.constraints {
                     if !diverged {
-                        println!(
-                            "Plans diverge at step {} (constraints differ):",
-                            i + 1
-                        );
+                        println!("Plans diverge at step {} (constraints differ):", i + 1);
                         diverged = true;
                     }
                     println!("  A constraints: {:?}", a.constraints);
@@ -218,7 +212,7 @@ fn cmd_diff(store: &ObjectStore, plan_a_id: &str, plan_b_id: &str) -> Result<()>
     Ok(())
 }
 
-fn cmd_ingest(store: &ObjectStore, adapter: &str, input: &std::path::Path) -> Result<()> {
+fn cmd_ingest(_store: &ObjectStore, adapter: &str, input: &std::path::Path) -> Result<()> {
     match adapter {
         "claude-code" => {
             println!("Ingesting Claude Code session: {}", input.display());
@@ -228,9 +222,7 @@ fn cmd_ingest(store: &ObjectStore, adapter: &str, input: &std::path::Path) -> Re
             println!("Ingesting OTEL GenAI spans: {}", input.display());
             println!("(otel-genai adapter: not yet implemented — coming in next PR)");
         }
-        other => bail!(
-            "unknown adapter '{other}'. Available adapters: claude-code, otel-genai"
-        ),
+        other => bail!("unknown adapter '{other}'. Available adapters: claude-code, otel-genai"),
     }
     Ok(())
 }
