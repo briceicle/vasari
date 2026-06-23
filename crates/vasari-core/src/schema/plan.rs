@@ -10,6 +10,12 @@ pub struct Plan {
     pub intent_ids: Vec<NodeId>,
     pub steps: Vec<PlanStep>,
     pub parent_ids: Vec<NodeId>,
+    #[serde(default = "default_schema_version")]
+    pub schema_version: String,
+}
+
+fn default_schema_version() -> String {
+    "1".to_string()
 }
 
 /// One step in a plan. Steps are sub-records of Plan, not standalone nodes.
@@ -28,6 +34,7 @@ impl Plan {
             intent_ids,
             steps,
             parent_ids,
+            schema_version: default_schema_version(),
         }
     }
 

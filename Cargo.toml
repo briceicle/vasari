@@ -3,7 +3,7 @@ members = ["crates/vasari-core", "crates/vasari"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/briceicle/vasari"
@@ -18,3 +18,5 @@ thiserror = "1"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1"
+regex = "1"
+once_cell = "1"

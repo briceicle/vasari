@@ -1,7 +1,10 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use vasari_core::{why_all, Node, ObjectStore};
+use vasari_core::{
+    ingest::{run_pipeline, IngestAdapter, IngestSource},
+    why_all, ConstraintPolarity, Node, NodeId, ObjectStore,
+};
 
 #[derive(Parser)]
 #[command(
@@ -35,17 +38,48 @@ enum Commands {
     /// Example: vasari diff plan-a plan-b
     Diff { plan_a: String, plan_b: String },
     /// Ingest an agent session into the Vasari graph.
-    Ingest {
-        /// Adapter to use: claude-code | otel-genai
+    #[command(subcommand)]
+    Ingest(IngestCommands),
+    /// Pin a constraint manually (supplements auto-extracted constraints).
+    ///
+    /// Example: vasari constrain "Never store secrets in env files" --plan <id>
+    Constrain {
+        /// Constraint text.
+        text: String,
+        /// Plan node ID this constraint is derived from.
         #[arg(long)]
-        adapter: String,
-        /// Path to the session file or span export.
-        input: PathBuf,
+        plan: String,
+        /// Polarity: mandatory (default) or prohibitive.
+        #[arg(long, default_value = "mandatory")]
+        polarity: String,
     },
+    /// List all ingested sessions (Intent nodes).
+    Sessions,
+    /// List all files with attribution coverage.
+    Files,
     /// Verify node signatures (opt-in; requires vasari verify setup).
     Verify,
     /// Rebuild indexes and verify object store integrity.
     Fsck,
+}
+
+#[derive(Subcommand)]
+enum IngestCommands {
+    /// Ingest a Claude Code session JSONL file.
+    ///
+    /// Example: vasari ingest claude-code ~/.claude/projects/myproject/session.jsonl
+    ClaudeCode {
+        /// Path to the session .jsonl file, or "-" for stdin.
+        input: String,
+    },
+    /// Ingest an OTLP JSON export with GenAI semantic conventions.
+    ///
+    /// Requires semconv ≥ 1.30.0 (gen_ai.* attributes).
+    /// Example: vasari ingest otel-genai ./spans.json
+    OtelGenai {
+        /// Path to the OTLP JSON file, or "-" for stdin.
+        input: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -60,7 +94,14 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Why { target, json } => cmd_why(&store, &target, json),
         Commands::Diff { plan_a, plan_b } => cmd_diff(&store, &plan_a, &plan_b),
-        Commands::Ingest { adapter, input } => cmd_ingest(&store, &adapter, &input),
+        Commands::Ingest(ingest_cmd) => cmd_ingest(&store, ingest_cmd),
+        Commands::Constrain {
+            text,
+            plan,
+            polarity,
+        } => cmd_constrain(&store, text, plan, polarity),
+        Commands::Sessions => cmd_sessions(&store),
+        Commands::Files => cmd_files(&store),
         Commands::Verify => cmd_verify(),
         Commands::Fsck => cmd_fsck(&store),
     }
@@ -145,8 +186,6 @@ fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
 }
 
 fn cmd_diff(store: &ObjectStore, plan_a_id: &str, plan_b_id: &str) -> Result<()> {
-    use vasari_core::schema::NodeId;
-
     let id_a = NodeId(plan_a_id.to_string());
     let id_b = NodeId(plan_b_id.to_string());
 
@@ -157,8 +196,6 @@ fn cmd_diff(store: &ObjectStore, plan_a_id: &str, plan_b_id: &str) -> Result<()>
         bail!("plan not found: {plan_b_id}");
     };
 
-    // v0.1 alignment: identical-string or substring match on goal field.
-    // v0.2: embedding similarity.
     let max_steps = plan_a.steps.len().max(plan_b.steps.len());
     let mut diverged = false;
 
@@ -212,18 +249,146 @@ fn cmd_diff(store: &ObjectStore, plan_a_id: &str, plan_b_id: &str) -> Result<()>
     Ok(())
 }
 
-fn cmd_ingest(_store: &ObjectStore, adapter: &str, input: &std::path::Path) -> Result<()> {
-    match adapter {
-        "claude-code" => {
-            println!("Ingesting Claude Code session: {}", input.display());
-            println!("(claude-code adapter: not yet implemented — coming in next PR)");
-        }
-        "otel-genai" => {
-            println!("Ingesting OTEL GenAI spans: {}", input.display());
-            println!("(otel-genai adapter: not yet implemented — coming in next PR)");
-        }
-        other => bail!("unknown adapter '{other}'. Available adapters: claude-code, otel-genai"),
+fn parse_ingest_source(input: String) -> IngestSource {
+    if input == "-" {
+        IngestSource::Stdin
+    } else {
+        IngestSource::File(PathBuf::from(input))
     }
+}
+
+fn cmd_ingest(store: &ObjectStore, cmd: IngestCommands) -> Result<()> {
+    use vasari_core::adapters::{claude_code::ClaudeCodeAdapter, otel::OtelGenAiAdapter};
+
+    let (adapter_name, events) = match cmd {
+        IngestCommands::ClaudeCode { input } => {
+            let events = ClaudeCodeAdapter
+                .parse(parse_ingest_source(input))
+                .with_context(|| "parsing Claude Code session")?;
+            ("claude-code", events)
+        }
+        IngestCommands::OtelGenai { input } => {
+            let events = OtelGenAiAdapter
+                .parse(parse_ingest_source(input))
+                .with_context(|| "parsing OTEL GenAI spans")?;
+            ("otel-genai", events)
+        }
+    };
+
+    let summary = run_pipeline(events, store)
+        .with_context(|| format!("running {adapter_name} ingest pipeline"))?;
+
+    println!("Ingest complete ({adapter_name}):");
+    println!("  intents:      {}", summary.intents_created);
+    println!("  plans:        {}", summary.plans_created);
+    println!("  constraints:  {}", summary.constraints_created);
+    println!("  actions:      {}", summary.actions_created);
+    println!("  attributions: {}", summary.attributions_created);
+
+    if !summary.degraded.is_empty() {
+        println!("\nDegraded ({} event(s) skipped):", summary.degraded.len());
+        for reason in &summary.degraded {
+            println!("  warn: {reason}");
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_constrain(
+    store: &ObjectStore,
+    text: String,
+    plan_id: String,
+    polarity_str: String,
+) -> Result<()> {
+    use vasari_core::schema::Constraint;
+
+    let polarity = match polarity_str.to_lowercase().as_str() {
+        "mandatory" | "m" => ConstraintPolarity::Mandatory,
+        "prohibitive" | "p" => ConstraintPolarity::Prohibitive,
+        other => bail!("unknown polarity '{other}'. Use: mandatory, prohibitive"),
+    };
+
+    let derived_from = NodeId(plan_id.clone());
+
+    // Validate that the plan exists.
+    match store.get(&derived_from)? {
+        Some(Node::Plan(_)) => {}
+        Some(_) => bail!("node {plan_id} exists but is not a Plan"),
+        None => bail!("plan not found: {plan_id}"),
+    }
+
+    let constraint = Constraint::new(text.clone(), derived_from, polarity, vec![]);
+    let id = constraint.id.clone();
+    store.put(&Node::Constraint(constraint))?;
+
+    println!("Constraint stored:");
+    println!("  id:       {id}");
+    println!("  text:     {text}");
+    println!("  polarity: {polarity_str}");
+    println!("  plan:     {plan_id}");
+
+    Ok(())
+}
+
+fn cmd_sessions(store: &ObjectStore) -> Result<()> {
+    let nodes = store.iter_all()?;
+    let mut intents: Vec<_> = nodes
+        .iter()
+        .filter_map(|n| {
+            if let Node::Intent(i) = n {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if intents.is_empty() {
+        println!("No sessions found. Run `vasari ingest` to populate.");
+        return Ok(());
+    }
+
+    intents.sort_by_key(|i| i.created_at);
+    println!("{} session(s):", intents.len());
+    for intent in intents {
+        println!(
+            "  {} | {} | {}",
+            &intent.id.as_str()[..8],
+            intent.created_at.format("%Y-%m-%d %H:%M UTC"),
+            intent.text.chars().take(60).collect::<String>()
+        );
+    }
+
+    Ok(())
+}
+
+fn cmd_files(store: &ObjectStore) -> Result<()> {
+    use std::collections::HashSet;
+
+    let nodes = store.iter_all()?;
+    let mut paths: HashSet<String> = HashSet::new();
+
+    for node in &nodes {
+        if let Node::Attribution(attr) = node {
+            if let vasari_core::schema::AttributionTarget::LineRange { path, .. } = &attr.target {
+                paths.insert(path.clone());
+            }
+        }
+    }
+
+    if paths.is_empty() {
+        println!("No files with attribution coverage. Run `vasari ingest` first.");
+        return Ok(());
+    }
+
+    let mut sorted: Vec<_> = paths.into_iter().collect();
+    sorted.sort();
+    println!("{} file(s) with attribution coverage:", sorted.len());
+    for path in sorted {
+        println!("  {path}");
+    }
+
     Ok(())
 }
 
