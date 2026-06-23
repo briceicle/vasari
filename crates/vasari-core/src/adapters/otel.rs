@@ -109,9 +109,7 @@ fn parse_otlp_json(json: &str) -> Result<Vec<IngestEvent>, VasariError> {
         let model = attrs.get("gen_ai.request.model").map(|s| s.as_str());
 
         // Only process spans that look like GenAI operations.
-        let is_gen_ai = op.is_some()
-            || system.is_some()
-            || attrs.contains_key("gen_ai.prompt");
+        let is_gen_ai = op.is_some() || system.is_some() || attrs.contains_key("gen_ai.prompt");
         if !is_gen_ai {
             continue;
         }
@@ -191,7 +189,10 @@ fn parse_otlp_json(json: &str) -> Result<Vec<IngestEvent>, VasariError> {
 
 /// Map a child span to a ToolCall IngestEvent.
 fn child_span_to_event(span: &Value) -> Option<IngestEvent> {
-    let name = span.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let name = span
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
     let attrs = span_attrs(span);
     let timestamp = span
         .get("startTimeUnixNano")
@@ -310,9 +311,9 @@ mod tests {
         let has_session = events
             .iter()
             .any(|e| matches!(e, IngestEvent::SessionStart { .. }));
-        let has_prompt = events.iter().any(|e| {
-            matches!(e, IngestEvent::UserPrompt { text, .. } if text.contains("JWT"))
-        });
+        let has_prompt = events
+            .iter()
+            .any(|e| matches!(e, IngestEvent::UserPrompt { text, .. } if text.contains("JWT")));
 
         assert!(has_session, "should have SessionStart");
         assert!(has_prompt, "should have UserPrompt from gen_ai.prompt");
@@ -342,7 +343,10 @@ mod tests {
   }]
 }"#;
         let events = parse_otlp_json(json).unwrap();
-        assert!(events.is_empty(), "non-gen_ai spans should produce no events");
+        assert!(
+            events.is_empty(),
+            "non-gen_ai spans should produce no events"
+        );
     }
 
     #[test]
@@ -368,7 +372,10 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, IngestEvent::ToolCall { .. }))
             .collect();
-        assert!(!tool_calls.is_empty(), "orphan span should become a ToolCall");
+        assert!(
+            !tool_calls.is_empty(),
+            "orphan span should become a ToolCall"
+        );
     }
 
     #[test]
@@ -394,7 +401,10 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, IngestEvent::SystemInstruction { text } if text.contains("JWT verification")))
             .collect();
-        assert!(!sys.is_empty(), "gen_ai.completion should become SystemInstruction");
+        assert!(
+            !sys.is_empty(),
+            "gen_ai.completion should become SystemInstruction"
+        );
     }
 
     #[test]

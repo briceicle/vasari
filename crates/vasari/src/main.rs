@@ -95,7 +95,11 @@ fn main() -> Result<()> {
         Commands::Why { target, json } => cmd_why(&store, &target, json),
         Commands::Diff { plan_a, plan_b } => cmd_diff(&store, &plan_a, &plan_b),
         Commands::Ingest(ingest_cmd) => cmd_ingest(&store, ingest_cmd),
-        Commands::Constrain { text, plan, polarity } => cmd_constrain(&store, text, plan, polarity),
+        Commands::Constrain {
+            text,
+            plan,
+            polarity,
+        } => cmd_constrain(&store, text, plan, polarity),
         Commands::Sessions => cmd_sessions(&store),
         Commands::Files => cmd_files(&store),
         Commands::Verify => cmd_verify(),

@@ -133,7 +133,10 @@ mod tests {
         let token = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890abcdef";
         let text = format!("key={token}");
         let result = redact(&text);
-        assert!(result.contains(REDACTED), "Anthropic API key should be redacted");
+        assert!(
+            result.contains(REDACTED),
+            "Anthropic API key should be redacted"
+        );
         assert!(!result.contains("sk-ant-api03-"));
     }
 
@@ -167,7 +170,10 @@ mod tests {
         let long_tok = "a".repeat(513);
         let text = format!("data={long_tok}");
         let result = redact(&text);
-        assert!(result.contains(&long_tok), "oversized token should not be redacted");
+        assert!(
+            result.contains(&long_tok),
+            "oversized token should not be redacted"
+        );
     }
 
     #[test]
@@ -181,8 +187,14 @@ mod tests {
         let token = "xK9mP2qRvL4nJwY8aB3cD5eF1gH0iZQs";
         let text = format!("token {token}");
         let result = redact(&text);
-        assert!(result.contains(REDACTED), "high-entropy token should be redacted");
-        assert!(!result.contains(token), "original token should not appear in output");
+        assert!(
+            result.contains(REDACTED),
+            "high-entropy token should be redacted"
+        );
+        assert!(
+            !result.contains(token),
+            "original token should not appear in output"
+        );
     }
 
     #[test]
@@ -190,7 +202,10 @@ mod tests {
         let token = "sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890abcdef";
         let text = format!("key={token}");
         let result = redact(&text);
-        assert!(result.contains(REDACTED), "OpenAI sk-proj- key should be redacted");
+        assert!(
+            result.contains(REDACTED),
+            "OpenAI sk-proj- key should be redacted"
+        );
         assert!(!result.contains("sk-proj-"));
     }
 
@@ -199,7 +214,10 @@ mod tests {
         let token = "github_pat_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ab";
         let text = format!("token={token}");
         let result = redact(&text);
-        assert!(result.contains(REDACTED), "github_pat_ token should be redacted");
+        assert!(
+            result.contains(REDACTED),
+            "github_pat_ token should be redacted"
+        );
         assert!(!result.contains("github_pat_"));
     }
 
@@ -208,7 +226,10 @@ mod tests {
         // Secret not space-delimited — attached to `key=` prefix
         let text = "OPENAI_KEY=sk-abcdefghijklmnopqrstuvwxyz1234567890AB";
         let result = redact(&text);
-        assert!(result.contains(REDACTED), "key attached to = should be redacted by regex pass");
+        assert!(
+            result.contains(REDACTED),
+            "key attached to = should be redacted by regex pass"
+        );
     }
 
     #[test]

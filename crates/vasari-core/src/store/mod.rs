@@ -358,7 +358,10 @@ mod tests {
             .join("targets")
             .join(&encoded)
             .join("1-100");
-        let mut f = std::fs::OpenOptions::new().append(true).open(&index_file).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&index_file)
+            .unwrap();
         use std::io::Write;
         writeln!(f, "{}", attr_id.as_str()).unwrap();
 
@@ -383,8 +386,14 @@ mod tests {
     #[test]
     fn encode_path_encodes_single_dot() {
         let encoded = encode_path("./relative.rs");
-        assert!(encoded.contains("%2E"), "single dot should be percent-encoded");
-        assert!(!encoded.contains(".."), "single dot should not be mistaken for dotdot");
+        assert!(
+            encoded.contains("%2E"),
+            "single dot should be percent-encoded"
+        );
+        assert!(
+            !encoded.contains(".."),
+            "single dot should not be mistaken for dotdot"
+        );
     }
 
     #[test]

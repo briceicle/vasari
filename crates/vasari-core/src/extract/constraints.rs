@@ -4,18 +4,25 @@ use regex::Regex;
 use crate::schema::{Constraint, ConstraintPolarity, NodeId};
 
 // Sentence boundary: period/bang/question followed by whitespace, or newline.
-static SENTENCE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"[.!?]\s+|\n+").unwrap());
+static SENTENCE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[.!?]\s+|\n+").unwrap());
 
 const MANDATORY_KEYWORDS: &[&str] = &[
     "must ", "must\t", "shall ", "always ", "required", "need to",
 ];
 
 const PROHIBITIVE_KEYWORDS: &[&str] = &[
-    "must not", "must-not", "mustn't",
-    "should not", "should-not", "shouldn't",
-    "never ", "never\t",
-    "prohibited", "forbidden", "do not", "don't",
+    "must not",
+    "must-not",
+    "mustn't",
+    "should not",
+    "should-not",
+    "shouldn't",
+    "never ",
+    "never\t",
+    "prohibited",
+    "forbidden",
+    "do not",
+    "don't",
 ];
 
 /// Extract constraint nodes from `text`, derived from `derived_from`.
@@ -92,7 +99,10 @@ mod tests {
     fn skips_short_sentences() {
         let text = "Must do.";
         let cs = extract_constraints(text, dummy_id(), vec![]);
-        assert!(cs.is_empty(), "sentence too short to be a meaningful constraint");
+        assert!(
+            cs.is_empty(),
+            "sentence too short to be a meaningful constraint"
+        );
     }
 
     #[test]
@@ -113,8 +123,12 @@ mod tests {
     fn both_polarities_in_same_text() {
         let text = "You must validate all inputs. Never store passwords in plaintext.";
         let cs = extract_constraints(text, dummy_id(), vec![]);
-        let has_mandatory = cs.iter().any(|c| c.polarity == ConstraintPolarity::Mandatory);
-        let has_prohibitive = cs.iter().any(|c| c.polarity == ConstraintPolarity::Prohibitive);
+        let has_mandatory = cs
+            .iter()
+            .any(|c| c.polarity == ConstraintPolarity::Mandatory);
+        let has_prohibitive = cs
+            .iter()
+            .any(|c| c.polarity == ConstraintPolarity::Prohibitive);
         assert!(has_mandatory, "should have a mandatory constraint");
         assert!(has_prohibitive, "should have a prohibitive constraint");
     }
@@ -143,6 +157,10 @@ mod tests {
         // (no trailing whitespace after the period) must still be captured.
         let text = "You must validate all inputs before writing";
         let cs = extract_constraints(text, dummy_id(), vec![]);
-        assert_eq!(cs.len(), 1, "sentence without trailing period should produce one constraint");
+        assert_eq!(
+            cs.len(),
+            1,
+            "sentence without trailing period should produce one constraint"
+        );
     }
 }

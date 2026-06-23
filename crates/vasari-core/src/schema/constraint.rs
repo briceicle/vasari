@@ -14,8 +14,18 @@ mod tests {
     fn polarity_is_included_in_hash() {
         let text = "You must validate all inputs before writing.";
         let derived = dummy_id();
-        let mandatory = Constraint::new(text.into(), derived.clone(), ConstraintPolarity::Mandatory, vec![]);
-        let prohibitive = Constraint::new(text.into(), derived.clone(), ConstraintPolarity::Prohibitive, vec![]);
+        let mandatory = Constraint::new(
+            text.into(),
+            derived.clone(),
+            ConstraintPolarity::Mandatory,
+            vec![],
+        );
+        let prohibitive = Constraint::new(
+            text.into(),
+            derived.clone(),
+            ConstraintPolarity::Prohibitive,
+            vec![],
+        );
         assert_ne!(
             mandatory.id, prohibitive.id,
             "different polarities must produce different IDs"
@@ -50,11 +60,19 @@ mod tests {
         // since schema_version is excluded from hash_input.
         let text = "You must always sanitize inputs.";
         let derived = dummy_id();
-        let c1 = Constraint::new(text.into(), derived.clone(), ConstraintPolarity::Mandatory, vec![]);
+        let c1 = Constraint::new(
+            text.into(),
+            derived.clone(),
+            ConstraintPolarity::Mandatory,
+            vec![],
+        );
         // Manually mutate schema_version — ID should remain unchanged.
         let mut c2 = c1.clone();
         c2.schema_version = "99".into();
-        assert_eq!(c1.id, c2.id, "schema_version must not affect the content hash");
+        assert_eq!(
+            c1.id, c2.id,
+            "schema_version must not affect the content hash"
+        );
     }
 }
 
@@ -97,7 +115,12 @@ impl Constraint {
         polarity: ConstraintPolarity,
         parent_ids: Vec<NodeId>,
     ) -> Self {
-        let id = NodeId(node_id(&Self::hash_input(&text, &derived_from, &polarity, &parent_ids)));
+        let id = NodeId(node_id(&Self::hash_input(
+            &text,
+            &derived_from,
+            &polarity,
+            &parent_ids,
+        )));
         Self {
             id,
             text,

@@ -36,15 +36,27 @@ fn golden_claude_code_ingest_end_to_end() {
     assert_eq!(summary.intents_created, 1, "one session → one intent");
     assert_eq!(summary.plans_created, 1, "one plan per session");
     assert!(summary.actions_created >= 2, "at least Edit + Write");
-    assert!(summary.attributions_created >= 2, "at least Edit + Write produce attributions");
-    assert!(summary.constraints_created >= 2, "must validate + never store keywords");
-    assert!(summary.degraded.is_empty(), "no degradations expected on clean fixture");
+    assert!(
+        summary.attributions_created >= 2,
+        "at least Edit + Write produce attributions"
+    );
+    assert!(
+        summary.constraints_created >= 2,
+        "must validate + never store keywords"
+    );
+    assert!(
+        summary.degraded.is_empty(),
+        "no degradations expected on clean fixture"
+    );
 
     // Verify attribution lookup reaches an Intent.
     let attr_ids = store
         .lookup_attributions("src/auth.rs", 1)
         .expect("lookup should not error");
-    assert!(!attr_ids.is_empty(), "src/auth.rs should have attribution coverage");
+    assert!(
+        !attr_ids.is_empty(),
+        "src/auth.rs should have attribution coverage"
+    );
 
     let Some(Node::Attribution(attr)) = store.get(&attr_ids[0]).unwrap() else {
         panic!("attribution node should be in store");
@@ -55,7 +67,10 @@ fn golden_claude_code_ingest_end_to_end() {
     let Some(Node::Plan(plan)) = store.get(&action.plan_ref.plan_id).unwrap() else {
         panic!("plan node should be in store");
     };
-    let intent_id = plan.intent_ids.first().expect("plan has at least one intent");
+    let intent_id = plan
+        .intent_ids
+        .first()
+        .expect("plan has at least one intent");
     let Some(Node::Intent(intent)) = store.get(intent_id).unwrap() else {
         panic!("intent node should be in store");
     };
@@ -85,8 +100,14 @@ fn ingest_is_idempotent() {
 
     // Verify that re-ingesting the same session doesn't create a second Intent.
     let nodes = store.iter_all().unwrap();
-    let intent_count = nodes.iter().filter(|n| matches!(n, Node::Intent(_))).count();
-    assert_eq!(intent_count, 1, "two ingest runs of the same session should produce exactly one Intent");
+    let intent_count = nodes
+        .iter()
+        .filter(|n| matches!(n, Node::Intent(_)))
+        .count();
+    assert_eq!(
+        intent_count, 1,
+        "two ingest runs of the same session should produce exactly one Intent"
+    );
 
     let attr_ids = store
         .lookup_attributions("src/auth.rs", 1)
@@ -120,7 +141,10 @@ fn golden_otel_ingest_creates_intent() {
     let summary = run_pipeline(events, &store).expect("pipeline should complete");
 
     assert_eq!(summary.intents_created, 1);
-    assert!(summary.actions_created >= 1, "at least one ToolCall expected");
+    assert!(
+        summary.actions_created >= 1,
+        "at least one ToolCall expected"
+    );
 }
 
 /// Verify that `iter_all` + Intent filtering backs `vasari sessions`.
@@ -174,6 +198,12 @@ fn iter_all_discovers_attributed_files() {
         })
         .collect();
 
-    assert!(paths.contains("src/auth.rs"), "src/auth.rs should be attributed");
-    assert!(paths.contains("src/jwt.rs"), "src/jwt.rs should be attributed");
+    assert!(
+        paths.contains("src/auth.rs"),
+        "src/auth.rs should be attributed"
+    );
+    assert!(
+        paths.contains("src/jwt.rs"),
+        "src/jwt.rs should be attributed"
+    );
 }

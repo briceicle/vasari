@@ -76,10 +76,7 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
             session_start = Some(timestamp);
         }
 
-        let record_type = record
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let record_type = record.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
         match record_type {
             "system" => {
@@ -137,7 +134,10 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
                         found_intent = true;
                     }
 
-                    events.push(IngestEvent::UserPrompt { text, timestamp: ts });
+                    events.push(IngestEvent::UserPrompt {
+                        text,
+                        timestamp: ts,
+                    });
                 }
             }
             "assistant" => {
@@ -167,13 +167,7 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
     // Prepend SessionStart now that we know the source label and start time.
     let source = session_source.unwrap_or_else(|| "claude-code:unknown".to_string());
     let started_at = session_start.unwrap_or_else(Utc::now);
-    events.insert(
-        0,
-        IngestEvent::SessionStart {
-            source,
-            started_at,
-        },
-    );
+    events.insert(0, IngestEvent::SessionStart { source, started_at });
 
     Ok(events)
 }
@@ -255,9 +249,25 @@ fn parse_tool_use_block(block: &Value, timestamp: DateTime<Utc>) -> Option<Inges
 /// Very short single-word responses that don't carry intent.
 fn is_boilerplate(text: &str) -> bool {
     const BOILERPLATE: &[&str] = &[
-        "y", "yes", "ok", "okay", "continue", "go", "go ahead", "sure",
-        "great", "thanks", "thank you", "looks good", "lgtm", "done",
-        "proceed", "next", "k", "yep", "yup",
+        "y",
+        "yes",
+        "ok",
+        "okay",
+        "continue",
+        "go",
+        "go ahead",
+        "sure",
+        "great",
+        "thanks",
+        "thank you",
+        "looks good",
+        "lgtm",
+        "done",
+        "proceed",
+        "next",
+        "k",
+        "yep",
+        "yup",
     ];
     let lower = text.trim().to_lowercase();
     BOILERPLATE.contains(&lower.as_str())
@@ -347,7 +357,10 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, IngestEvent::SystemInstruction { .. }))
             .collect();
-        assert!(!sys.is_empty(), "system record should produce SystemInstruction");
+        assert!(
+            !sys.is_empty(),
+            "system record should produce SystemInstruction"
+        );
     }
 
     #[test]
@@ -360,7 +373,10 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, IngestEvent::SystemInstruction { .. }))
             .collect();
-        assert!(!sys.is_empty(), "summary record should produce SystemInstruction");
+        assert!(
+            !sys.is_empty(),
+            "summary record should produce SystemInstruction"
+        );
     }
 
     #[test]
@@ -398,7 +414,11 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, IngestEvent::UserPrompt { .. }))
             .collect();
-        assert_eq!(prompts.len(), 1, "tool_result turn should not produce UserPrompt");
+        assert_eq!(
+            prompts.len(),
+            1,
+            "tool_result turn should not produce UserPrompt"
+        );
     }
 
     #[test]
