@@ -28,8 +28,10 @@ pub struct ResolveChain {
     pub action: Action,
     /// The attribution node linking the action to this file:line range.
     pub attribution: Attribution,
-    /// Constraints that shaped this plan step. Empty until the ingest adapters
-    /// populate constraint nodes (v0.1: always empty).
+    /// Constraints that shaped this work: any Constraint derived from this
+    /// plan or one of its intents (e.g. "must validate the token signature",
+    /// "never store the secret in source"). Sorted by text. Empty when the
+    /// session carried no extractable constraints.
     pub constraints: Vec<Constraint>,
 }
 
@@ -190,8 +192,22 @@ fn resolve_one(store: &ObjectStore, attr_id: &NodeId) -> Result<ResolveChain, Va
     // Most recent amendment first.
     intents.sort_by_key(|i| Reverse(i.created_at));
 
-    // Constraints are empty until ingest adapters populate them (v0.1).
-    let constraints: Vec<Constraint> = Vec::new();
+    // Join constraints attached to this chain: any Constraint whose
+    // `derived_from` points at this plan or one of its intents. v0.x scans the
+    // object store (one ingest produces a handful of constraints); if constraint
+    // volume grows, a `derived_from` index can replace this scan.
+    let mut relevant: HashSet<NodeId> = plan.intent_ids.iter().cloned().collect();
+    relevant.insert(plan.id.clone());
+    let mut constraints: Vec<Constraint> = store
+        .iter_all()?
+        .into_iter()
+        .filter_map(|n| match n {
+            Node::Constraint(c) if relevant.contains(&c.derived_from) => Some(c),
+            _ => None,
+        })
+        .collect();
+    // Stable, deterministic order for display + tests.
+    constraints.sort_by(|a, b| a.text.cmp(&b.text));
 
     Ok(ResolveChain {
         intents,
@@ -264,6 +280,77 @@ mod tests {
         );
         store.put(&Node::Attribution(attr.clone())).unwrap();
         attr
+    }
+
+    fn make_constraint(store: &ObjectStore, text: &str, derived_from: NodeId) -> Constraint {
+        use crate::schema::ConstraintPolarity;
+        let c = Constraint::new(
+            text.into(),
+            derived_from,
+            ConstraintPolarity::Mandatory,
+            vec![],
+        );
+        store.put(&Node::Constraint(c.clone())).unwrap();
+        c
+    }
+
+    #[test]
+    fn chain_includes_constraints_derived_from_intent_and_excludes_others() {
+        let (store, _dir) = make_store();
+        let intent = make_intent(&store, "ACME-1", "Add JWT verification");
+        let plan = make_plan(
+            &store,
+            vec![intent.id.clone()],
+            vec![PlanStep {
+                goal: "invoke Edit".into(),
+                constraints: vec![],
+            }],
+        );
+        let action = make_action(&store, "Edit", plan.id.clone(), 0);
+        make_attr(&store, action.id.clone(), "src/auth.ts", 1, u32::MAX, 0.7);
+
+        // Two constraints derived from the intent (should both appear), one
+        // derived from an unrelated node (should be excluded).
+        make_constraint(
+            &store,
+            "must validate the token signature",
+            intent.id.clone(),
+        );
+        make_constraint(
+            &store,
+            "never store the secret in source",
+            intent.id.clone(),
+        );
+        make_constraint(&store, "unrelated rule", NodeId("deadbeef".repeat(8)));
+
+        let chain = why(&store, "src/auth.ts", 47).unwrap().unwrap();
+        let texts: Vec<&str> = chain.constraints.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "must validate the token signature",
+                "never store the secret in source"
+            ],
+            "only intent-derived constraints, sorted by text"
+        );
+    }
+
+    #[test]
+    fn chain_constraints_empty_when_none_attached() {
+        let (store, _dir) = make_store();
+        let intent = make_intent(&store, "s", "do a thing");
+        let plan = make_plan(
+            &store,
+            vec![intent.id.clone()],
+            vec![PlanStep {
+                goal: "invoke Write".into(),
+                constraints: vec![],
+            }],
+        );
+        let action = make_action(&store, "Write", plan.id.clone(), 0);
+        make_attr(&store, action.id.clone(), "src/x.rs", 1, u32::MAX, 0.7);
+        let chain = why(&store, "src/x.rs", 1).unwrap().unwrap();
+        assert!(chain.constraints.is_empty());
     }
 
     #[test]
