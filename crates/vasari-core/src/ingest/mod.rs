@@ -8,7 +8,8 @@ use crate::{
     extract::constraints::extract_constraints,
     redact::redact,
     schema::{
-        Action, Attribution, AttributionTarget, Intent, Node, NodeId, Plan, PlanRef, PlanStep,
+        Action, Attribution, AttributionTarget, Evidence, EvidenceKind, Intent, Node, NodeId, Plan,
+        PlanRef, PlanStep,
     },
     store::ObjectStore,
 };
@@ -142,6 +143,11 @@ pub fn run_pipeline(
     // (system-instruction) constraints can be attached to every plan.
     let mut plan_ids: Vec<NodeId> = Vec::with_capacity(turns.len());
 
+    // Running, document-order view of each file's content, so Edits can be
+    // located against the file as the agent saw it (from Read results).
+    let mut file_contents: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
     for turn in &turns {
         // --- Intent (this turn's prompt) ---
         let intent = Intent::new_at(
@@ -171,6 +177,16 @@ pub fn run_pipeline(
 
         // --- Actions + Attributions for this turn ---
         for (step_index, (name, args, result_summary, timestamp)) in turn.tools.iter().enumerate() {
+            // A Read result is the file's content as the agent saw it — record it
+            // so a later Edit can be located against it.
+            if name == "Read" {
+                if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
+                    if !result_summary.is_empty() {
+                        file_contents.insert(path.to_string(), result_summary.clone());
+                    }
+                }
+            }
+
             let action = Action::new(
                 name.clone(),
                 args.clone(),
@@ -188,7 +204,9 @@ pub fn run_pipeline(
             store.put(&Node::Action(action))?;
             summary.actions_created += 1;
 
-            if let Some(attr) = attribution_for_tool(name, args, &action_id, &intent_id) {
+            for attr in
+                attributions_for_action(name, args, &action_id, &intent_id, &mut file_contents)
+            {
                 store.put(&Node::Attribution(attr))?;
                 summary.attributions_created += 1;
             }
@@ -277,38 +295,151 @@ fn step_goal(tool: &str, args: &Value) -> String {
     }
 }
 
-/// Produce an Attribution node for Edit/Write tool calls.
-/// Returns None for tools that don't produce file-level attributions.
-fn attribution_for_tool(
+/// Confidence for an attribution whose exact line range was located.
+const EXACT_CONFIDENCE: f32 = 1.0;
+/// Confidence for a whole-file degrade (range could not be located).
+const WHOLE_FILE_CONFIDENCE: f32 = 0.7;
+
+/// Produce attribution node(s) for a file-writing tool call, computing line
+/// ranges structurally where possible.
+///
+/// - **Write** `{file_path, content}` → `LineRange 1..N` (N = line count); the
+///   file's content becomes `content`.
+/// - **Edit** `{file_path, old_string, new_string}` → locate `old_string` in the
+///   file's known content (captured from a prior Read result) to get a
+///   `LineRange`; on success the content is updated so later edits resolve
+///   against the post-edit file. If the content is unknown or `old_string` is
+///   not found, degrade to `WholeFile`.
+/// - **MultiEdit** `{file_path, edits:[{old_string,new_string}]}` → one
+///   attribution per edit, applied in sequence.
+///
+/// `file_contents` is the running, document-order view of each file's text.
+/// Returns an empty vec for non-file tools.
+fn attributions_for_action(
     tool: &str,
     args: &Value,
     action_id: &NodeId,
     intent_id: &NodeId,
-) -> Option<Attribution> {
+    file_contents: &mut std::collections::HashMap<String, String>,
+) -> Vec<Attribution> {
     let path = match tool {
-        "Edit" | "Write" | "MultiEdit" => args
-            .get("file_path")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        _ => None,
-    }?;
-
-    // Reject paths that escape the repo (adapter should pre-validate, this is defence-in-depth).
+        "Edit" | "Write" | "MultiEdit" => args.get("file_path").and_then(|v| v.as_str()),
+        _ => return vec![],
+    };
+    let Some(path) = path else { return vec![] };
+    // Defence-in-depth: the adapter pre-validates, but never trust a path here.
     if path.contains("..") {
-        return None;
+        return vec![];
     }
 
-    // Confidence assigned to whole-file attributions — calibrated empirically.
-    // E8 computes precise line ranges where possible; this is the degrade case.
-    const WHOLE_FILE_CONFIDENCE: f32 = 0.7;
+    let make = |target, confidence, kind| {
+        Attribution::new(
+            action_id.clone(),
+            target,
+            confidence,
+            vec![Evidence {
+                kind,
+                details: Value::Null,
+            }],
+            vec![intent_id.clone()],
+        )
+    };
 
-    Some(Attribution::new(
-        action_id.clone(),
-        AttributionTarget::WholeFile { path },
+    match tool {
+        "Write" => {
+            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            let lines = line_count(content);
+            file_contents.insert(path.to_string(), content.to_string());
+            vec![make(
+                AttributionTarget::LineRange {
+                    path: path.to_string(),
+                    start: 1,
+                    end: lines,
+                },
+                EXACT_CONFIDENCE,
+                EvidenceKind::ExactRange,
+            )]
+        }
+        "Edit" => {
+            let old = args
+                .get("old_string")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let new = args
+                .get("new_string")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            vec![edit_attribution(path, old, new, file_contents, &make)]
+        }
+        "MultiEdit" => {
+            let edits = args.get("edits").and_then(|v| v.as_array());
+            match edits {
+                Some(edits) if !edits.is_empty() => edits
+                    .iter()
+                    .map(|e| {
+                        let old = e.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
+                        let new = e.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
+                        edit_attribution(path, old, new, file_contents, &make)
+                    })
+                    .collect(),
+                // Malformed MultiEdit → whole-file degrade.
+                _ => vec![make(
+                    AttributionTarget::WholeFile {
+                        path: path.to_string(),
+                    },
+                    WHOLE_FILE_CONFIDENCE,
+                    EvidenceKind::Fuzzed,
+                )],
+            }
+        }
+        _ => vec![],
+    }
+}
+
+/// Resolve one Edit to an attribution, updating `file_contents` on success.
+fn edit_attribution(
+    path: &str,
+    old: &str,
+    new: &str,
+    file_contents: &mut std::collections::HashMap<String, String>,
+    make: &impl Fn(AttributionTarget, f32, EvidenceKind) -> Attribution,
+) -> Attribution {
+    if let Some(content) = file_contents.get(path) {
+        if !old.is_empty() {
+            if let Some(byte_idx) = content.find(old) {
+                let start = content[..byte_idx].matches('\n').count() as u32 + 1;
+                let end = start + line_count(new).saturating_sub(1);
+                // Apply the edit so subsequent edits resolve against new content.
+                let updated = content.replacen(old, new, 1);
+                file_contents.insert(path.to_string(), updated);
+                return make(
+                    AttributionTarget::LineRange {
+                        path: path.to_string(),
+                        start,
+                        end,
+                    },
+                    EXACT_CONFIDENCE,
+                    EvidenceKind::ExactRange,
+                );
+            }
+        }
+    }
+    // Unknown content or old_string not found → honest whole-file degrade.
+    make(
+        AttributionTarget::WholeFile {
+            path: path.to_string(),
+        },
         WHOLE_FILE_CONFIDENCE,
-        vec![],
-        vec![intent_id.clone()],
-    ))
+        EvidenceKind::Fuzzed,
+    )
+}
+
+/// Number of lines a string spans (at least 1; a trailing newline doesn't add one).
+fn line_count(s: &str) -> u32 {
+    if s.is_empty() {
+        return 1;
+    }
+    s.lines().count().max(1) as u32
 }
 
 #[cfg(test)]
@@ -361,6 +492,114 @@ mod tests {
         assert_eq!(summary.actions_created, 1);
         assert_eq!(summary.attributions_created, 1);
         assert!(summary.degraded.is_empty());
+    }
+
+    fn attr_target_for(store: &ObjectStore, path: &str) -> AttributionTarget {
+        store
+            .iter_all()
+            .unwrap()
+            .into_iter()
+            .find_map(|n| match n {
+                Node::Attribution(a) => {
+                    let p = match &a.target {
+                        AttributionTarget::LineRange { path, .. }
+                        | AttributionTarget::WholeFile { path } => path.clone(),
+                        AttributionTarget::CommitSha { .. } => return None,
+                    };
+                    (p == path).then_some(a.target)
+                }
+                _ => None,
+            })
+            .expect("attribution for path")
+    }
+
+    #[test]
+    fn write_attribution_is_line_range_one_to_n() {
+        let (store, _dir) = make_store();
+        let content = "line1\nline2\nline3\n";
+        let events = vec![
+            IngestEvent::UserPrompt {
+                text: "create the module".into(),
+                timestamp: Utc::now(),
+            },
+            IngestEvent::ToolCall {
+                name: "Write".into(),
+                args: json!({ "file_path": "src/new.rs", "content": content }),
+                result_summary: "New file created".into(),
+                timestamp: Utc::now(),
+            },
+        ];
+        run_pipeline(events, &store).unwrap();
+        match attr_target_for(&store, "src/new.rs") {
+            AttributionTarget::LineRange { start, end, .. } => {
+                assert_eq!((start, end), (1, 3));
+            }
+            other => panic!("expected LineRange, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_located_against_prior_read_yields_line_range() {
+        let (store, _dir) = make_store();
+        // Read provides the file content; the Edit targets line 3.
+        let file = "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}\n";
+        let events = vec![
+            IngestEvent::UserPrompt {
+                text: "rewrite function c".into(),
+                timestamp: Utc::now(),
+            },
+            IngestEvent::ToolCall {
+                name: "Read".into(),
+                args: json!({ "file_path": "src/x.rs" }),
+                result_summary: file.into(),
+                timestamp: Utc::now(),
+            },
+            IngestEvent::ToolCall {
+                name: "Edit".into(),
+                args: json!({ "file_path": "src/x.rs", "old_string": "fn c() {}", "new_string": "fn c() { c2(); }" }),
+                result_summary: "ok".into(),
+                timestamp: Utc::now(),
+            },
+        ];
+        run_pipeline(events, &store).unwrap();
+        match attr_target_for(&store, "src/x.rs") {
+            AttributionTarget::LineRange { start, end, .. } => {
+                assert_eq!(start, 3, "fn c() is on line 3");
+                assert_eq!(end, 3, "single-line replacement");
+            }
+            other => panic!("expected LineRange, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_without_known_content_degrades_to_whole_file() {
+        let (store, _dir) = make_store();
+        // No preceding Read → content unknown → whole-file degrade.
+        let events = vec![
+            IngestEvent::UserPrompt {
+                text: "tweak it".into(),
+                timestamp: Utc::now(),
+            },
+            IngestEvent::ToolCall {
+                name: "Edit".into(),
+                args: json!({ "file_path": "src/y.rs", "old_string": "a", "new_string": "b" }),
+                result_summary: String::new(),
+                timestamp: Utc::now(),
+            },
+        ];
+        run_pipeline(events, &store).unwrap();
+        assert!(matches!(
+            attr_target_for(&store, "src/y.rs"),
+            AttributionTarget::WholeFile { .. }
+        ));
+    }
+
+    #[test]
+    fn line_count_handles_edges() {
+        assert_eq!(line_count(""), 1);
+        assert_eq!(line_count("one"), 1);
+        assert_eq!(line_count("a\nb"), 2);
+        assert_eq!(line_count("a\nb\n"), 2);
     }
 
     #[test]
