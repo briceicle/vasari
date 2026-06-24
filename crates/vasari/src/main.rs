@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use vasari_core::{
     ingest::{run_pipeline, IngestAdapter, IngestSource},
-    why_all, ConstraintPolarity, Node, NodeId, ObjectStore,
+    why_all, ConstraintPolarity, Node, ObjectStore,
 };
 
 #[derive(Parser)]
@@ -55,6 +55,8 @@ enum Commands {
     },
     /// List all ingested sessions (Intent nodes).
     Sessions,
+    /// List all plans (with short IDs to pass to `vasari diff`).
+    Plans,
     /// List all files with attribution coverage.
     Files,
     /// Verify node signatures (opt-in; requires vasari verify setup).
@@ -101,6 +103,7 @@ fn main() -> Result<()> {
             polarity,
         } => cmd_constrain(&store, text, plan, polarity),
         Commands::Sessions => cmd_sessions(&store),
+        Commands::Plans => cmd_plans(&store),
         Commands::Files => cmd_files(&store),
         Commands::Verify => cmd_verify(),
         Commands::Fsck => cmd_fsck(&store),
@@ -186,14 +189,18 @@ fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
 }
 
 fn cmd_diff(store: &ObjectStore, plan_a_id: &str, plan_b_id: &str) -> Result<()> {
-    let id_a = NodeId(plan_a_id.to_string());
-    let id_b = NodeId(plan_b_id.to_string());
+    let id_a = store
+        .resolve_prefix(plan_a_id)
+        .with_context(|| format!("resolving plan A '{plan_a_id}'"))?;
+    let id_b = store
+        .resolve_prefix(plan_b_id)
+        .with_context(|| format!("resolving plan B '{plan_b_id}'"))?;
 
     let Some(Node::Plan(plan_a)) = store.get(&id_a)? else {
-        bail!("plan not found: {plan_a_id}");
+        bail!("not a plan: {plan_a_id} (resolved to {id_a})");
     };
     let Some(Node::Plan(plan_b)) = store.get(&id_b)? else {
-        bail!("plan not found: {plan_b_id}");
+        bail!("not a plan: {plan_b_id} (resolved to {id_b})");
     };
 
     let max_steps = plan_a.steps.len().max(plan_b.steps.len());
@@ -309,9 +316,11 @@ fn cmd_constrain(
         other => bail!("unknown polarity '{other}'. Use: mandatory, prohibitive"),
     };
 
-    let derived_from = NodeId(plan_id.clone());
+    let derived_from = store
+        .resolve_prefix(&plan_id)
+        .with_context(|| format!("resolving plan '{plan_id}'"))?;
 
-    // Validate that the plan exists.
+    // Validate that the resolved node is actually a Plan.
     match store.get(&derived_from)? {
         Some(Node::Plan(_)) => {}
         Some(_) => bail!("node {plan_id} exists but is not a Plan"),
@@ -357,6 +366,32 @@ fn cmd_sessions(store: &ObjectStore) -> Result<()> {
             &intent.id.as_str()[..8],
             intent.created_at.format("%Y-%m-%d %H:%M UTC"),
             intent.text.chars().take(60).collect::<String>()
+        );
+    }
+
+    Ok(())
+}
+
+fn cmd_plans(store: &ObjectStore) -> Result<()> {
+    let nodes = store.iter_all()?;
+    let plans: Vec<_> = nodes
+        .iter()
+        .filter_map(|n| if let Node::Plan(p) = n { Some(p) } else { None })
+        .collect();
+
+    if plans.is_empty() {
+        println!("No plans found. Run `vasari ingest` to populate.");
+        return Ok(());
+    }
+
+    println!("{} plan(s):", plans.len());
+    for plan in plans {
+        // Short id is enough to pass to `vasari diff`; resolve_prefix expands it.
+        println!(
+            "  {} | {} step(s) | {} intent(s)",
+            &plan.id.as_str()[..8],
+            plan.steps.len(),
+            plan.intent_ids.len(),
         );
     }
 
