@@ -15,20 +15,53 @@ use crate::schema::{Attribution, AttributionTarget, Node, NodeId};
 ///   index/targets/<encoded-path>/<start>-<end>  → attribution node IDs (newline-separated)
 ///   refs/                             human-readable refs
 ///   HEAD                              current intent context
+#[derive(Debug)]
 pub struct ObjectStore {
     root: PathBuf,
 }
 
 impl ObjectStore {
+    /// On-disk store format generation. Bumped when a change to node identity
+    /// or layout makes older stores unreadable. v2 introduced per-turn Intents
+    /// and the `WholeFile` attribution target — both change node hashes, so a
+    /// pre-v2 store no longer resolves and must be re-ingested.
+    pub const FORMAT_VERSION: &'static str = "2";
+
     /// Open (or initialize) the store at `<repo_root>/.vasari/`.
+    ///
+    /// A fresh store is stamped with [`FORMAT_VERSION`]. An existing store whose
+    /// stamp differs (or is missing, i.e. pre-v2) is refused with
+    /// [`VasariError::IncompatibleStore`] — re-ingest is the migration path.
     pub fn open(repo_root: &Path) -> Result<Self, VasariError> {
         let root = repo_root.join(".vasari");
+        // Detect a pre-existing store BEFORE create_dir_all materializes objects/.
+        let preexisting = root.join("objects").exists();
+        let format_path = root.join("format");
+
         std::fs::create_dir_all(root.join("objects"))?;
         std::fs::create_dir_all(root.join("index").join("targets"))?;
         std::fs::create_dir_all(root.join("refs"))?;
         if !root.join("HEAD").exists() {
             std::fs::write(root.join("HEAD"), "")?;
         }
+
+        if preexisting {
+            // Missing format file == pre-v2 store.
+            let found = std::fs::read_to_string(&format_path)
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "1 (pre-v2)".to_string());
+            if found != Self::FORMAT_VERSION {
+                return Err(VasariError::IncompatibleStore {
+                    found,
+                    expected: Self::FORMAT_VERSION.to_string(),
+                });
+            }
+        } else {
+            std::fs::write(&format_path, Self::FORMAT_VERSION)?;
+        }
+
         Ok(Self { root })
     }
 
@@ -85,20 +118,27 @@ impl ObjectStore {
             let entry = entry?;
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
-            // Index file names: "<start>-<end>"
-            if let Some((start_s, end_s)) = name_str.split_once('-') {
-                if let (Ok(start), Ok(end)) = (start_s.parse::<u32>(), end_s.parse::<u32>()) {
-                    if line >= start && line <= end {
-                        let content = std::fs::read_to_string(entry.path())?;
-                        for id_str in content.lines() {
-                            // Validate hex format before accepting IDs from index files.
-                            if !id_str.is_empty()
-                                && id_str.len() >= 4
-                                && id_str.chars().all(|c| c.is_ascii_hexdigit())
-                            {
-                                ids.push(NodeId(id_str.to_string()));
-                            }
-                        }
+            // Index file names: "<start>-<end>" for a range, or "whole" for a
+            // whole-file attribution (matches every line in the file).
+            let covers_line = if name_str == "whole" {
+                true
+            } else if let Some((start_s, end_s)) = name_str.split_once('-') {
+                match (start_s.parse::<u32>(), end_s.parse::<u32>()) {
+                    (Ok(start), Ok(end)) => line >= start && line <= end,
+                    _ => false,
+                }
+            } else {
+                false
+            };
+            if covers_line {
+                let content = std::fs::read_to_string(entry.path())?;
+                for id_str in content.lines() {
+                    // Validate hex format before accepting IDs from index files.
+                    if !id_str.is_empty()
+                        && id_str.len() >= 4
+                        && id_str.chars().all(|c| c.is_ascii_hexdigit())
+                    {
+                        ids.push(NodeId(id_str.to_string()));
                     }
                 }
             }
@@ -223,20 +263,25 @@ impl ObjectStore {
     }
 
     fn index_attribution(&self, attr: &Attribution) -> Result<(), VasariError> {
-        if let AttributionTarget::LineRange { path, start, end } = &attr.target {
-            let path_dir = self
-                .root
-                .join("index")
-                .join("targets")
-                .join(encode_path(path));
-            std::fs::create_dir_all(&path_dir)?;
-            let index_file = path_dir.join(format!("{start}-{end}"));
-            let mut f = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&index_file)?;
-            writeln!(f, "{}", attr.id.as_str())?;
-        }
+        // Index file name encodes the covered range: "<start>-<end>" for a
+        // LineRange, or the literal "whole" for a WholeFile (matches any line).
+        let (path, index_name) = match &attr.target {
+            AttributionTarget::LineRange { path, start, end } => (path, format!("{start}-{end}")),
+            AttributionTarget::WholeFile { path } => (path, "whole".to_string()),
+            AttributionTarget::CommitSha { .. } => return Ok(()),
+        };
+        let path_dir = self
+            .root
+            .join("index")
+            .join("targets")
+            .join(encode_path(path));
+        std::fs::create_dir_all(&path_dir)?;
+        let index_file = path_dir.join(index_name);
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&index_file)?;
+        writeln!(f, "{}", attr.id.as_str())?;
         Ok(())
     }
 }
@@ -314,6 +359,61 @@ mod tests {
         assert!(found.contains(&attr_id));
         let not_found = store.lookup_attributions("src/auth.ts", 60).unwrap();
         assert!(not_found.is_empty());
+    }
+
+    #[test]
+    fn fresh_store_is_stamped_and_reopens() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).unwrap();
+        let version = std::fs::read_to_string(dir.path().join(".vasari").join("format")).unwrap();
+        assert_eq!(version.trim(), ObjectStore::FORMAT_VERSION);
+        drop(store);
+        // Reopening a store of the current version succeeds.
+        assert!(ObjectStore::open(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn pre_v2_store_without_format_marker_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        // Simulate a pre-v2 store: objects/ exists, no format file.
+        std::fs::create_dir_all(dir.path().join(".vasari").join("objects")).unwrap();
+        let err = ObjectStore::open(dir.path()).unwrap_err();
+        match err {
+            VasariError::IncompatibleStore { expected, .. } => {
+                assert_eq!(expected, ObjectStore::FORMAT_VERSION);
+            }
+            other => panic!("expected IncompatibleStore, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn whole_file_attribution_matches_any_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).unwrap();
+        let attr = Attribution::new(
+            NodeId("deadbeef".repeat(8)),
+            AttributionTarget::WholeFile {
+                path: "src/auth.rs".into(),
+            },
+            0.7,
+            vec![],
+            vec![],
+        );
+        let attr_id = attr.id.clone();
+        store.put(&Node::Attribution(attr)).unwrap();
+        // A whole-file attribution covers every line.
+        for line in [1u32, 47, 9999] {
+            let found = store.lookup_attributions("src/auth.rs", line).unwrap();
+            assert!(
+                found.contains(&attr_id),
+                "whole-file should match line {line}"
+            );
+        }
+        // But not other files.
+        assert!(store
+            .lookup_attributions("src/other.rs", 1)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
