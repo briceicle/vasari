@@ -1,0 +1,6 @@
+{"file": "src/logger.rs", "line": 1, "expected_intent": ["fix the logging format in the logger"], "confidence_threshold": 0.5}
+{"file": "src/logger.rs", "line": 2, "expected_intent": ["fix the logging format in the logger"], "confidence_threshold": 0.5}
+{"file": "src/logger.rs", "line": 3, "expected_intent": ["fix the logging format in the logger"], "confidence_threshold": 0.5}
+{"file": "src/logger.rs", "line": 4, "expected_intent": ["fix the logging format in the logger"], "confidence_threshold": 0.5}
+{"file": "src/logger.rs", "line": 5, "expected_intent": ["fix the logging format in the logger"], "confidence_threshold": 0.5}
+{"file": "src/logger.rs", "line": 6, "expected_intent": ["fix the logging format in the logger"], "confidence_threshold": 0.5}
