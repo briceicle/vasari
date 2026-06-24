@@ -27,7 +27,7 @@ pub enum IngestEvent {
         source: String,
         started_at: DateTime<Utc>,
     },
-    /// A substantive user message — the first one becomes the session Intent.
+    /// A substantive user message — each one opens a new turn (Intent + Plan).
     UserPrompt {
         text: String,
         timestamp: DateTime<Utc>,
@@ -59,6 +59,19 @@ pub trait IngestAdapter {
     fn parse(&self, source: IngestSource) -> Result<Vec<IngestEvent>, VasariError>;
 }
 
+/// A redacted tool call: (tool name, args, result summary, timestamp).
+type ToolCallData = (String, Value, String, DateTime<Utc>);
+
+/// One conversational turn: a substantive user prompt plus the tool calls the
+/// agent made in response to it (in document order). Each turn becomes one
+/// Intent + one Plan, so `vasari why` resolves a line to the specific request
+/// that produced it rather than the whole session's first prompt.
+struct Turn {
+    text: String,
+    timestamp: DateTime<Utc>,
+    tools: Vec<ToolCallData>,
+}
+
 /// Run the ingest pipeline on a list of events.
 ///
 /// Pipeline: redact → synthesize → store → index.
@@ -70,22 +83,27 @@ pub fn run_pipeline(
 ) -> Result<IngestSummary, VasariError> {
     let mut summary = IngestSummary::default();
 
-    // Separate events by kind.
+    // Walk events in DOCUMENT order, grouping tool calls into turns. Each
+    // substantive user prompt opens a new turn; tool calls attach to the most
+    // recent preceding prompt. Document order (not timestamps, which are coarse
+    // and can fall back to wall-clock at ingest) is the causal chain.
     let mut session_source = String::from("unknown-session");
-    let mut session_started_at: Option<DateTime<Utc>> = None;
-    let mut user_prompts: Vec<(String, DateTime<Utc>)> = Vec::new();
-    let mut tool_calls: Vec<(String, Value, String, DateTime<Utc>)> = Vec::new();
     let mut system_instructions: Vec<String> = Vec::new();
+    let mut turns: Vec<Turn> = Vec::new();
+    // Tool calls seen before the first prompt — attached to turn 1.
+    let mut pre_prompt_tools: Vec<ToolCallData> = Vec::new();
 
     for event in events {
         match event {
-            IngestEvent::SessionStart { source, started_at } => {
+            IngestEvent::SessionStart { source, .. } => {
                 session_source = source;
-                session_started_at = Some(started_at);
             }
             IngestEvent::UserPrompt { text, timestamp } => {
-                let clean = redact(&text);
-                user_prompts.push((clean, timestamp));
+                turns.push(Turn {
+                    text: redact(&text),
+                    timestamp,
+                    tools: Vec::new(),
+                });
             }
             IngestEvent::ToolCall {
                 name,
@@ -93,7 +111,11 @@ pub fn run_pipeline(
                 result_summary,
                 timestamp,
             } => {
-                tool_calls.push((name, redact_value(args), redact(&result_summary), timestamp));
+                let tc = (name, redact_value(args), redact(&result_summary), timestamp);
+                match turns.last_mut() {
+                    Some(turn) => turn.tools.push(tc),
+                    None => pre_prompt_tools.push(tc),
+                }
             }
             IngestEvent::SystemInstruction { text } => {
                 system_instructions.push(redact(&text));
@@ -102,80 +124,90 @@ pub fn run_pipeline(
     }
 
     // Require at least one user prompt to form an Intent.
-    if user_prompts.is_empty() {
+    if turns.is_empty() {
         summary.degraded.push(DegradedReason::EmptySession {
             source: session_source.clone(),
         });
         return Ok(summary);
     }
 
-    let (intent_text, intent_ts) = &user_prompts[0];
-    let session_ts = session_started_at.unwrap_or(*intent_ts);
+    // Pre-prompt tool calls belong to the first turn.
+    if !pre_prompt_tools.is_empty() {
+        let mut prepended = std::mem::take(&mut pre_prompt_tools);
+        prepended.append(&mut turns[0].tools);
+        turns[0].tools = prepended;
+    }
 
-    // --- Intent ---
-    let intent = Intent::new_at(
-        session_source.clone(),
-        intent_text.clone(),
-        session_ts,
-        vec![],
-    );
-    let intent_id = intent.id.clone();
-    store.put(&Node::Intent(intent))?;
-    summary.intents_created += 1;
+    // One Intent + one Plan per turn. Collect plan IDs so session-level
+    // (system-instruction) constraints can be attached to every plan.
+    let mut plan_ids: Vec<NodeId> = Vec::with_capacity(turns.len());
 
-    // --- Plan: one step per tool call ---
-    let steps: Vec<PlanStep> = tool_calls
-        .iter()
-        .map(|(name, args, _, _)| PlanStep {
-            goal: step_goal(name, args),
-            constraints: vec![],
-        })
-        .collect();
-
-    let plan = Plan::new(vec![intent_id.clone()], steps, vec![]);
-    let plan_id = plan.id.clone();
-    store.put(&Node::Plan(plan))?;
-    summary.plans_created += 1;
-
-    // --- Actions + Attributions ---
-    for (step_index, (name, args, result_summary, timestamp)) in tool_calls.iter().enumerate() {
-        let action = Action::new(
-            name.clone(),
-            args.clone(),
-            // Store only a truncated summary: tool results (esp. Read = whole
-            // file contents) can be large, and result_summary is a hash-excluded
-            // annotation. Range computation reads the full in-memory result, not
-            // the stored field, so truncation here is lossless for attribution.
-            truncate_summary(result_summary),
-            *timestamp,
-            PlanRef {
-                plan_id: plan_id.clone(),
-                step_index,
-            },
-            vec![intent_id.clone()],
+    for turn in &turns {
+        // --- Intent (this turn's prompt) ---
+        let intent = Intent::new_at(
+            session_source.clone(),
+            turn.text.clone(),
+            turn.timestamp,
+            vec![],
         );
-        let action_id = action.id.clone();
-        store.put(&Node::Action(action))?;
-        summary.actions_created += 1;
+        let intent_id = intent.id.clone();
+        store.put(&Node::Intent(intent))?;
+        summary.intents_created += 1;
 
-        // Attribution for file-writing tools.
-        if let Some(attr) = attribution_for_tool(name, args, &action_id, &intent_id) {
-            store.put(&Node::Attribution(attr))?;
-            summary.attributions_created += 1;
+        // --- Plan: one step per tool call in this turn ---
+        let steps: Vec<PlanStep> = turn
+            .tools
+            .iter()
+            .map(|(name, args, _, _)| PlanStep {
+                goal: step_goal(name, args),
+                constraints: vec![],
+            })
+            .collect();
+        let plan = Plan::new(vec![intent_id.clone()], steps, vec![]);
+        let plan_id = plan.id.clone();
+        store.put(&Node::Plan(plan))?;
+        summary.plans_created += 1;
+        plan_ids.push(plan_id.clone());
+
+        // --- Actions + Attributions for this turn ---
+        for (step_index, (name, args, result_summary, timestamp)) in turn.tools.iter().enumerate() {
+            let action = Action::new(
+                name.clone(),
+                args.clone(),
+                // Truncated annotation only: full results stay in-memory for
+                // range computation (see truncate_summary).
+                truncate_summary(result_summary),
+                *timestamp,
+                PlanRef {
+                    plan_id: plan_id.clone(),
+                    step_index,
+                },
+                vec![intent_id.clone()],
+            );
+            let action_id = action.id.clone();
+            store.put(&Node::Action(action))?;
+            summary.actions_created += 1;
+
+            if let Some(attr) = attribution_for_tool(name, args, &action_id, &intent_id) {
+                store.put(&Node::Attribution(attr))?;
+                summary.attributions_created += 1;
+            }
+        }
+
+        // --- Per-prompt constraints: derived from THIS turn's intent ---
+        for constraint in extract_constraints(&turn.text, intent_id.clone(), vec![]) {
+            store.put(&Node::Constraint(constraint))?;
+            summary.constraints_created += 1;
         }
     }
 
-    // --- Constraints: extracted from all user prompts and system instructions ---
-    let constraint_sources: Vec<&str> = user_prompts
-        .iter()
-        .map(|(t, _)| t.as_str())
-        .chain(system_instructions.iter().map(|s| s.as_str()))
-        .collect();
-
-    for text in constraint_sources {
-        for constraint in extract_constraints(text, intent_id.clone(), vec![]) {
-            store.put(&Node::Constraint(constraint))?;
-            summary.constraints_created += 1;
+    // --- Session-level constraints: system instructions apply to every plan ---
+    for sys in &system_instructions {
+        for plan_id in &plan_ids {
+            for constraint in extract_constraints(sys, plan_id.clone(), vec![]) {
+                store.put(&Node::Constraint(constraint))?;
+                summary.constraints_created += 1;
+            }
         }
     }
 
@@ -334,6 +366,82 @@ mod tests {
         assert_eq!(summary.actions_created, 1);
         assert_eq!(summary.attributions_created, 1);
         assert!(summary.degraded.is_empty());
+    }
+
+    #[test]
+    fn multi_turn_session_creates_one_intent_per_turn() {
+        let (store, _dir) = make_store();
+        let t0 = Utc::now();
+        let events = vec![
+            IngestEvent::UserPrompt {
+                text: "Add JWT verification to auth".into(),
+                timestamp: t0,
+            },
+            IngestEvent::ToolCall {
+                name: "Edit".into(),
+                args: json!({ "file_path": "src/auth.rs", "old_string": "a", "new_string": "b" }),
+                result_summary: String::new(),
+                timestamp: t0,
+            },
+            IngestEvent::UserPrompt {
+                text: "Now refactor the date helpers".into(),
+                timestamp: t0,
+            },
+            IngestEvent::ToolCall {
+                name: "Edit".into(),
+                args: json!({ "file_path": "src/dates.rs", "old_string": "c", "new_string": "d" }),
+                result_summary: String::new(),
+                timestamp: t0,
+            },
+        ];
+        let summary = run_pipeline(events, &store).unwrap();
+        assert_eq!(summary.intents_created, 2, "one intent per turn");
+        assert_eq!(summary.plans_created, 2, "one plan per turn");
+
+        // why on lines from different turns returns the turn-specific intent.
+        let a = crate::resolve::why(&store, "src/auth.rs", 1)
+            .unwrap()
+            .unwrap();
+        let d = crate::resolve::why(&store, "src/dates.rs", 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            a.primary_intent().unwrap().text,
+            "Add JWT verification to auth"
+        );
+        assert_eq!(
+            d.primary_intent().unwrap().text,
+            "Now refactor the date helpers"
+        );
+    }
+
+    #[test]
+    fn tool_calls_before_first_prompt_attach_to_turn_one() {
+        let (store, _dir) = make_store();
+        let t0 = Utc::now();
+        let events = vec![
+            // A tool call with no preceding prompt (e.g. a resumed session).
+            IngestEvent::ToolCall {
+                name: "Edit".into(),
+                args: json!({ "file_path": "src/early.rs", "old_string": "a", "new_string": "b" }),
+                result_summary: String::new(),
+                timestamp: t0,
+            },
+            IngestEvent::UserPrompt {
+                text: "the actual first prompt".into(),
+                timestamp: t0,
+            },
+        ];
+        let summary = run_pipeline(events, &store).unwrap();
+        assert_eq!(summary.intents_created, 1);
+        // The pre-prompt edit is attributed to turn 1's intent, not dropped.
+        let chain = crate::resolve::why(&store, "src/early.rs", 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            chain.primary_intent().unwrap().text,
+            "the actual first prompt"
+        );
     }
 
     #[test]
