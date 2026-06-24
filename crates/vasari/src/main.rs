@@ -412,8 +412,13 @@ fn cmd_files(store: &ObjectStore) -> Result<()> {
 
     for node in &nodes {
         if let Node::Attribution(attr) = node {
-            if let vasari_core::schema::AttributionTarget::LineRange { path, .. } = &attr.target {
-                paths.insert(path.clone());
+            use vasari_core::schema::AttributionTarget;
+            match &attr.target {
+                AttributionTarget::LineRange { path, .. }
+                | AttributionTarget::WholeFile { path } => {
+                    paths.insert(path.clone());
+                }
+                AttributionTarget::CommitSha { .. } => {}
             }
         }
     }
