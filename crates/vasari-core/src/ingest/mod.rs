@@ -93,7 +93,7 @@ pub fn run_pipeline(
                 result_summary,
                 timestamp,
             } => {
-                tool_calls.push((name, redact_json(args), redact(&result_summary), timestamp));
+                tool_calls.push((name, redact_value(args), redact(&result_summary), timestamp));
             }
             IngestEvent::SystemInstruction { text } => {
                 system_instructions.push(redact(&text));
@@ -178,15 +178,20 @@ pub fn run_pipeline(
     Ok(summary)
 }
 
-/// Recursively redact all string leaf values in a JSON value.
-/// Applied to tool call args before they are stored in Action nodes.
-fn redact_json(value: Value) -> Value {
+/// Recursively redact all string leaves in a JSON value — both object keys and
+/// values. Best-effort (the underlying `redact` is heuristic); applied to
+/// tool-call args before they are stored in Action nodes, and reused by the
+/// corpus scrubber. Keys are redacted too so a secret embedded as a key
+/// (e.g. `{"<secret>": "used"}`) cannot slip through.
+pub fn redact_value(value: Value) -> Value {
     match value {
         Value::String(s) => Value::String(redact(&s)),
-        Value::Array(arr) => Value::Array(arr.into_iter().map(redact_json).collect()),
-        Value::Object(map) => {
-            Value::Object(map.into_iter().map(|(k, v)| (k, redact_json(v))).collect())
-        }
+        Value::Array(arr) => Value::Array(arr.into_iter().map(redact_value).collect()),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(k, v)| (redact(&k), redact_value(v)))
+                .collect(),
+        ),
         other => other,
     }
 }
