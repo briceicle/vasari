@@ -24,8 +24,12 @@ Known deferred items as of v0.2.0.0.
 
 - [ ] **Python wheel** — maturin build + UniFFI bindings so `pip install vasari` works.
 
-- [ ] **Attribution corpus** — hand-label 100 lines from a real Claude Code session,
-  run `tests/corpus/attribution/run.sh`, confirm ≥80% accuracy ship gate passes.
+- [~] **Attribution accuracy gate** — harness SHIPPED: `vasari_core::eval` (Wilson CI,
+  precision/recall, single-vs-multi-intent split), `tests/attribution_accuracy.rs`
+  (always-run synthetic + `#[ignore]`d real gate), `tests/corpus/attribution/run.sh`,
+  `SCRIPT.md`, `LABELING.md`, scrubber (`examples/scrub_session.rs`). REMAINING: generate
+  the scripted multi-intent corpus (≥100 labeled lines, ≥1 multi-intent file) per
+  `SCRIPT.md`, then `bash tests/corpus/attribution/run.sh` to evaluate the gate.
 
 - [ ] **MCP ingest adapter** — parse MCP tool-call streams into the intent graph (v0.2+ per plan).
 

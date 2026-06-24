@@ -7,6 +7,34 @@ Version scheme: `MAJOR.MINOR.PATCH.BUILD` (gstack convention).
 
 ---
 
+## [0.2.1.0] — 2026-06-24
+
+### Added
+
+**vasari-core** (`crates/vasari-core`)
+
+- `eval` module — attribution accuracy gate for `vasari why`. Scores the resolver
+  against a labeled corpus: Wilson score lower bound (plain form), token-overlap intent
+  matching, precision + recall, and **single-intent vs multi-intent file accuracy
+  reported separately** so a blended number can't hide a multi-intent collapse. The
+  gate is only evaluated at `n ≥ 100` (`InsufficientCorpus` below that — a 10-line
+  pilot can't clear the 70% Wilson floor). Measures file→intent accuracy honestly:
+  the attributor is whole-file, so `:line` is not validated in v0.x.
+- `redact_value()` — promoted from the private ingest walker and now redacts JSON
+  **object keys** as well as values, closing a path where a secret used as a key could
+  survive scrubbing and ingest.
+- `examples/scrub_session.rs` — reuses `redact_value` to scrub a session JSONL for
+  corpus inclusion (best-effort first layer; pair with gitleaks/trufflehog).
+
+**Tests & corpus**
+
+- `tests/attribution_accuracy.rs` — always-run synthetic evaluator test (incl. a
+  multi-intent file and a duplicate-label dedup case) + the `#[ignore]`d real-corpus
+  gate (`cargo test --test attribution_accuracy -- --ignored`).
+- `tests/corpus/attribution/` — `run.sh` (gate runner + `scrub` subcommand),
+  `SCRIPT.md` (scripted multi-intent corpus recipe), `LABELING.md` (label format,
+  discovery command, worked example); README updated.
+
 ## [0.2.0.0] — 2026-06-22
 
 ### Added
