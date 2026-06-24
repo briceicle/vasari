@@ -241,13 +241,10 @@ fn parse_tool_use_block(
         .cloned()
         .unwrap_or(Value::Object(Default::default()));
 
-    // For tools with paths, validate the path doesn't escape the repo.
+    // For tools with paths, validate the path doesn't escape the repo
+    // (shared rule — see ingest::is_safe_path).
     if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
-        if path.contains("..") {
-            return None;
-        }
-        // Reject absolute paths to files outside the repo (heuristic: /home, /Users, /etc).
-        if path.starts_with('/') {
+        if !crate::ingest::is_safe_path(path) {
             return None;
         }
     }

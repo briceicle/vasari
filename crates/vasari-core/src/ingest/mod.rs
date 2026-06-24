@@ -63,6 +63,14 @@ pub trait IngestAdapter {
 /// A redacted tool call: (tool name, args, result summary, timestamp).
 type ToolCallData = (String, Value, String, DateTime<Utc>);
 
+/// Whether a tool-call file path is safe to ingest. Single source of truth for
+/// path safety, shared by every adapter and the attribution synthesizer so the
+/// rule can't drift between entry points: reject parent-dir traversal (`..`) and
+/// absolute paths (which point outside the target repo).
+pub(crate) fn is_safe_path(path: &str) -> bool {
+    !path.contains("..") && !path.starts_with('/')
+}
+
 /// One conversational turn: a substantive user prompt plus the tool calls the
 /// agent made in response to it (in document order). Each turn becomes one
 /// Intent + one Plan, so `vasari why` resolves a line to the specific request
@@ -328,7 +336,7 @@ fn attributions_for_action(
     };
     let Some(path) = path else { return vec![] };
     // Defence-in-depth: the adapter pre-validates, but never trust a path here.
-    if path.contains("..") {
+    if !is_safe_path(path) {
         return vec![];
     }
 
@@ -592,6 +600,16 @@ mod tests {
             attr_target_for(&store, "src/y.rs"),
             AttributionTarget::WholeFile { .. }
         ));
+    }
+
+    #[test]
+    fn is_safe_path_rejects_traversal_and_absolute() {
+        assert!(is_safe_path("src/auth.rs"));
+        assert!(is_safe_path("a/b/c.rs"));
+        assert!(!is_safe_path("../etc/passwd"));
+        assert!(!is_safe_path("a/../../b"));
+        assert!(!is_safe_path("/etc/passwd"));
+        assert!(!is_safe_path("/Users/x/secret"));
     }
 
     #[test]
