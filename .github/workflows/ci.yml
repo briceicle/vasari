@@ -48,3 +48,6 @@ jobs:
 
       - name: Test
         run: cargo test --all
+
+      - name: Attribution accuracy gate
+        run: cargo test -p vasari-core --test attribution_accuracy -- --ignored --nocapture

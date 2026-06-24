@@ -1,0 +1,12 @@
+{"file": "src/api_test.rs", "line": 1, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}
+{"file": "src/api_test.rs", "line": 2, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}
+{"file": "src/api_test.rs", "line": 3, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}
+{"file": "src/api_test.rs", "line": 4, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}
+{"file": "src/api_test.rs", "line": 5, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}
+{"file": "src/api_test.rs", "line": 6, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}
+{"file": "src/fixtures.rs", "line": 1, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}
+{"file": "src/fixtures.rs", "line": 2, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}
+{"file": "src/fixtures.rs", "line": 3, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}
+{"file": "src/fixtures.rs", "line": 4, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}
+{"file": "src/fixtures.rs", "line": 5, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}
+{"file": "src/fixtures.rs", "line": 6, "expected_intent": ["write integration tests for the api"], "confidence_threshold": 0.5}

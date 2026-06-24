@@ -1,0 +1,12 @@
+{"file": "src/http.rs", "line": 1, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}
+{"file": "src/http.rs", "line": 2, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}
+{"file": "src/http.rs", "line": 3, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}
+{"file": "src/http.rs", "line": 4, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}
+{"file": "src/http.rs", "line": 5, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}
+{"file": "src/http.rs", "line": 6, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}
+{"file": "src/retry.rs", "line": 1, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}
+{"file": "src/retry.rs", "line": 2, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}
+{"file": "src/retry.rs", "line": 3, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}
+{"file": "src/retry.rs", "line": 4, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}
+{"file": "src/retry.rs", "line": 5, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}
+{"file": "src/retry.rs", "line": 6, "expected_intent": ["add retry with backoff to the http client"], "confidence_threshold": 0.5}

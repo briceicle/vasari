@@ -1,0 +1,12 @@
+{"file": "src/parser.rs", "line": 1, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
+{"file": "src/parser.rs", "line": 2, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
+{"file": "src/parser.rs", "line": 3, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
+{"file": "src/parser.rs", "line": 4, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
+{"file": "src/parser.rs", "line": 5, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
+{"file": "src/parser.rs", "line": 6, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
+{"file": "src/errors.rs", "line": 1, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
+{"file": "src/errors.rs", "line": 2, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
+{"file": "src/errors.rs", "line": 3, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
+{"file": "src/errors.rs", "line": 4, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
+{"file": "src/errors.rs", "line": 5, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
+{"file": "src/errors.rs", "line": 6, "expected_intent": ["add structured error types to the parser"], "confidence_threshold": 0.5}
