@@ -134,6 +134,7 @@ fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
                 "action_tool": chain.action.tool,
                 "confidence": chain.confidence(),
                 "attribution_id": chain.attribution.id.as_str(),
+                "constraints": chain.constraints.iter().map(|c| &c.text).collect::<Vec<_>>(),
             });
             println!("{}", serde_json::to_string(&obj)?);
         }
@@ -179,6 +180,11 @@ fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
 
         // Confidence with evidence kind hint.
         println!("  conf  {:.2}", chain.confidence());
+
+        // Constraints that shaped this work, if any were extracted.
+        for c in &chain.constraints {
+            println!("  rule  {}", c.text);
+        }
 
         if chains.len() > 1 {
             println!();
