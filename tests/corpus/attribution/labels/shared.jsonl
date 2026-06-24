@@ -1,0 +1,6 @@
+{"file": "src/shared.rs", "line": 1, "expected_intent": ["add rate limit middleware to the api", "fix the logging format in the logger"], "confidence_threshold": 0.5, "notes": "multi-intent: edited by s01 and s02"}
+{"file": "src/shared.rs", "line": 2, "expected_intent": ["add rate limit middleware to the api", "fix the logging format in the logger"], "confidence_threshold": 0.5, "notes": "multi-intent: edited by s01 and s02"}
+{"file": "src/shared.rs", "line": 3, "expected_intent": ["add rate limit middleware to the api", "fix the logging format in the logger"], "confidence_threshold": 0.5, "notes": "multi-intent: edited by s01 and s02"}
+{"file": "src/shared.rs", "line": 4, "expected_intent": ["add rate limit middleware to the api", "fix the logging format in the logger"], "confidence_threshold": 0.5, "notes": "multi-intent: edited by s01 and s02"}
+{"file": "src/shared.rs", "line": 5, "expected_intent": ["add rate limit middleware to the api", "fix the logging format in the logger"], "confidence_threshold": 0.5, "notes": "multi-intent: edited by s01 and s02"}
+{"file": "src/shared.rs", "line": 6, "expected_intent": ["add rate limit middleware to the api", "fix the logging format in the logger"], "confidence_threshold": 0.5, "notes": "multi-intent: edited by s01 and s02"}

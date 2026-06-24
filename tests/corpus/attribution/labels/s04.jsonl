@@ -1,0 +1,12 @@
+{"file": "src/users.rs", "line": 1, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
+{"file": "src/users.rs", "line": 2, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
+{"file": "src/users.rs", "line": 3, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
+{"file": "src/users.rs", "line": 4, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
+{"file": "src/users.rs", "line": 5, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
+{"file": "src/users.rs", "line": 6, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
+{"file": "src/page.rs", "line": 1, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
+{"file": "src/page.rs", "line": 2, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
+{"file": "src/page.rs", "line": 3, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
+{"file": "src/page.rs", "line": 4, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
+{"file": "src/page.rs", "line": 5, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
+{"file": "src/page.rs", "line": 6, "expected_intent": ["implement pagination for the users endpoint"], "confidence_threshold": 0.5}
