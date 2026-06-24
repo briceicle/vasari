@@ -8,6 +8,8 @@ pub enum VasariError {
     HashMismatch { expected: String, actual: String },
     #[error("invalid node id: {0}")]
     InvalidNodeId(String),
+    #[error("incompatible .vasari store format (found {found}, this vasari needs {expected}) — remove the .vasari directory and re-ingest your sessions")]
+    IncompatibleStore { found: String, expected: String },
     #[error("ambiguous id prefix '{prefix}' matches {count} nodes — use more characters")]
     AmbiguousPrefix { prefix: String, count: usize },
     #[error("no attribution found for {path}:{line} — run `vasari ingest` to populate the graph, or `vasari fsck` to rebuild the index")]

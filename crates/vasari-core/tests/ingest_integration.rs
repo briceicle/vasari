@@ -190,8 +190,10 @@ fn iter_all_discovers_attributed_files() {
         .iter()
         .filter_map(|n| {
             if let Node::Attribution(a) = n {
-                if let AttributionTarget::LineRange { path, .. } = &a.target {
-                    return Some(path.clone());
+                match &a.target {
+                    AttributionTarget::LineRange { path, .. }
+                    | AttributionTarget::WholeFile { path } => return Some(path.clone()),
+                    AttributionTarget::CommitSha { .. } => {}
                 }
             }
             None
