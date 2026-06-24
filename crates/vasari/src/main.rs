@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use vasari_core::{
     ingest::{run_pipeline, IngestAdapter, IngestSource},
-    why_all, ConstraintPolarity, Node, ObjectStore,
+    why_all, ConstraintPolarity, Node, ObjectStore, VasariError,
 };
 
 #[derive(Parser)]
@@ -116,8 +116,16 @@ fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
     let chains = why_all(store, &path, line).with_context(|| format!("resolving {path}:{line}"))?;
 
     if chains.is_empty() {
-        println!("No attribution found for {path}:{line}");
-        println!("Run `vasari ingest` first to populate the graph.");
+        // Single source of truth for the empty-state message: the typed error
+        // names the right next steps (incl. `vasari files`) and is correct even
+        // when the user has already ingested but queried an uncovered path.
+        println!(
+            "{}",
+            VasariError::AttributionNotFound {
+                path: path.clone(),
+                line
+            }
+        );
         return Ok(());
     }
 
