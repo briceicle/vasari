@@ -142,7 +142,11 @@ pub fn run_pipeline(
         let action = Action::new(
             name.clone(),
             args.clone(),
-            result_summary.clone(),
+            // Store only a truncated summary: tool results (esp. Read = whole
+            // file contents) can be large, and result_summary is a hash-excluded
+            // annotation. Range computation reads the full in-memory result, not
+            // the stored field, so truncation here is lossless for attribution.
+            truncate_summary(result_summary),
             *timestamp,
             PlanRef {
                 plan_id: plan_id.clone(),
@@ -194,6 +198,24 @@ pub fn redact_value(value: Value) -> Value {
         ),
         other => other,
     }
+}
+
+/// Max bytes of a tool result kept in the stored `Action.result_summary`.
+/// Results (notably Read = full file contents) are only needed in-memory for
+/// range computation; the stored copy is a human-readable annotation.
+const MAX_RESULT_SUMMARY: usize = 2000;
+
+/// Truncate a result summary to [`MAX_RESULT_SUMMARY`] bytes on a char boundary,
+/// appending an ellipsis marker when truncated.
+fn truncate_summary(s: &str) -> String {
+    if s.len() <= MAX_RESULT_SUMMARY {
+        return s.to_string();
+    }
+    let mut end = MAX_RESULT_SUMMARY;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}… [truncated]", &s[..end])
 }
 
 /// Human-meaningful goal for a plan step: the tool plus its primary target,

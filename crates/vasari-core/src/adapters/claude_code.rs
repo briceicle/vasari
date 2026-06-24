@@ -11,6 +11,7 @@
 ///   • The *first* non-command, non-empty user text becomes the session Intent.
 ///   • ToolCall events are emitted for Edit, Write, MultiEdit, Bash, and Read.
 ///   • Edit / Write / MultiEdit also produce an AttributionTarget via run_pipeline.
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 
 use chrono::{DateTime, Utc};
@@ -42,27 +43,36 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
     let mut session_start: Option<DateTime<Utc>> = None;
     let mut session_source: Option<String> = None;
     let mut found_intent = false;
-    let mut line_no: u64 = 0;
 
-    for line in reader.lines() {
-        line_no += 1;
+    // Parse every line up front. A tool_use block (assistant record) and its
+    // tool_result (the *following* human record) are correlated only by
+    // tool_use_id, so we need the whole document before emitting ToolCall events.
+    let mut records: Vec<Value> = Vec::new();
+    for (idx, line) in reader.lines().enumerate() {
+        let line_no = idx as u64 + 1;
         let line = line.map_err(VasariError::Io)?;
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
+        match serde_json::from_str::<Value>(line) {
+            Ok(v) => records.push(v),
+            // Graceful degradation: record the parse error, keep going.
+            Err(e) => events.push(IngestEvent::SystemInstruction {
+                text: format!("[parse error on line {line_no}: {e}]"),
+            }),
+        }
+    }
 
-        let record: Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => {
-                // Graceful degradation: skip unparsable lines.
-                events.push(IngestEvent::SystemInstruction {
-                    text: format!("[parse error on line {line_no}: {e}]"),
-                });
-                continue;
-            }
-        };
+    // Pass 1: build tool_use_id -> result-text from tool_result blocks. This is
+    // where Read results (file contents) and Edit/Write confirmations live.
+    let mut results: HashMap<String, String> = HashMap::new();
+    for record in &records {
+        collect_tool_results(record, &mut results);
+    }
 
+    // Pass 2: emit events in document order.
+    for record in &records {
         // Extract timestamp from the record (top-level "timestamp" field).
         let timestamp = record
             .get("timestamp")
@@ -81,7 +91,7 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
         match record_type {
             "system" => {
                 // System prompt — contains CLAUDE.md or other instructions.
-                if let Some(text) = extract_text_from_record(&record) {
+                if let Some(text) = extract_text_from_record(record) {
                     events.push(IngestEvent::SystemInstruction { text });
                 }
             }
@@ -151,7 +161,7 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
                 if let Some(content_arr) = content.and_then(|c| c.as_array()) {
                     for block in content_arr {
                         if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
-                            if let Some(ev) = parse_tool_use_block(block, timestamp) {
+                            if let Some(ev) = parse_tool_use_block(block, timestamp, &results) {
                                 events.push(ev);
                             }
                         }
@@ -213,7 +223,11 @@ fn extract_text_from_record(record: &Value) -> Option<String> {
     extract_user_text(message.get("content"))
 }
 
-fn parse_tool_use_block(block: &Value, timestamp: DateTime<Utc>) -> Option<IngestEvent> {
+fn parse_tool_use_block(
+    block: &Value,
+    timestamp: DateTime<Utc>,
+    results: &HashMap<String, String>,
+) -> Option<IngestEvent> {
     let name = block.get("name").and_then(|v| v.as_str())?.to_string();
 
     // Only ingest tools we understand.
@@ -238,12 +252,81 @@ fn parse_tool_use_block(block: &Value, timestamp: DateTime<Utc>) -> Option<Inges
         }
     }
 
+    // Correlate this tool_use with its tool_result (keyed by id). For Read this
+    // is the file content; for Edit/Write it is the success confirmation. Empty
+    // when the session has no matching result (e.g. truncated export).
+    let result_summary = block
+        .get("id")
+        .and_then(|v| v.as_str())
+        .and_then(|id| results.get(id))
+        .cloned()
+        .unwrap_or_default();
+
     Some(IngestEvent::ToolCall {
         name,
         args,
-        result_summary: String::new(),
+        result_summary,
         timestamp,
     })
+}
+
+/// Collect tool_result blocks from a human record into `out` (tool_use_id -> text).
+/// Claude Code attaches each tool's result to the *following* human turn as a
+/// `tool_result` block keyed by `tool_use_id`.
+fn collect_tool_results(record: &Value, out: &mut HashMap<String, String>) {
+    if record.get("type").and_then(|v| v.as_str()) != Some("human") {
+        return;
+    }
+    let Some(content) = record
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+    else {
+        return;
+    };
+    for block in content {
+        if block.get("type").and_then(|v| v.as_str()) != Some("tool_result") {
+            continue;
+        }
+        let Some(id) = block.get("tool_use_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if let Some(text) = extract_tool_result_text(block.get("content")) {
+            out.insert(id.to_string(), text);
+        }
+    }
+}
+
+/// Extract the textual payload of a tool_result `content` field, which may be a
+/// bare string or an array of `{type:"text", text:"..."}` blocks.
+fn extract_tool_result_text(content: Option<&Value>) -> Option<String> {
+    let content = content?;
+    if let Some(s) = content.as_str() {
+        let t = s.trim();
+        return if t.is_empty() {
+            None
+        } else {
+            Some(t.to_string())
+        };
+    }
+    if let Some(arr) = content.as_array() {
+        let mut parts = Vec::new();
+        for block in arr {
+            if block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
+                    if !t.trim().is_empty() {
+                        parts.push(t.to_string());
+                    }
+                }
+            }
+        }
+        return if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("\n"))
+        };
+    }
+    None
 }
 
 /// Very short single-word responses that don't carry intent.
@@ -277,6 +360,42 @@ fn is_boilerplate(text: &str) -> bool {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn tool_result_is_correlated_into_tool_call() {
+        // Read's result (file content) arrives in the *next* human record,
+        // keyed by tool_use_id. The adapter must thread it onto the ToolCall.
+        let jsonl = r#"{"type":"human","timestamp":"2024-01-01T00:00:00Z","uuid":"u1","message":{"role":"user","content":"Read the auth file"}}
+{"type":"assistant","timestamp":"2024-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"src/auth.rs"}}]}}
+{"type":"human","timestamp":"2024-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"pub fn authenticate() {}"}]}]}}"#;
+        let events = parse_jsonl(Cursor::new(jsonl)).unwrap();
+        let read_result = events.iter().find_map(|e| match e {
+            IngestEvent::ToolCall {
+                name,
+                result_summary,
+                ..
+            } if name == "Read" => Some(result_summary.clone()),
+            _ => None,
+        });
+        assert_eq!(read_result.as_deref(), Some("pub fn authenticate() {}"));
+    }
+
+    #[test]
+    fn tool_call_without_result_has_empty_summary() {
+        // No matching tool_result (e.g. truncated export) → empty, not a panic.
+        let jsonl = r#"{"type":"human","timestamp":"2024-01-01T00:00:00Z","uuid":"u1","message":{"role":"user","content":"edit it"}}
+{"type":"assistant","timestamp":"2024-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t9","name":"Edit","input":{"file_path":"src/x.rs","old_string":"a","new_string":"b"}}]}}"#;
+        let events = parse_jsonl(Cursor::new(jsonl)).unwrap();
+        let edit_result = events.iter().find_map(|e| match e {
+            IngestEvent::ToolCall {
+                name,
+                result_summary,
+                ..
+            } if name == "Edit" => Some(result_summary.clone()),
+            _ => None,
+        });
+        assert_eq!(edit_result.as_deref(), Some(""));
+    }
 
     #[test]
     fn parses_minimal_session() {
