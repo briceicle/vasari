@@ -134,6 +134,49 @@ impl ObjectStore {
         Ok(nodes)
     }
 
+    /// Resolve a (possibly abbreviated) node-id prefix to a full `NodeId`.
+    ///
+    /// Matches against object FILENAMES under `objects/<shard>/` — never
+    /// deserializes a node, never panics. Returns:
+    ///   • `Ok(id)`                          on a unique match
+    ///   • `Err(InvalidNodeId)`              for non-hex / too-short input
+    ///   • `Err(NodeNotFound)`               when nothing matches
+    ///   • `Err(AmbiguousPrefix { count })`  when 2+ nodes share the prefix
+    ///
+    /// Minimum length is 4 (2-char shard + 2-char body) to avoid matching an
+    /// entire shard. The on-disk layout is `objects/<sha[0..2]>/<sha[2..]>`,
+    /// so the shard is the lookup directory and the remainder is a filename
+    /// prefix — an O(files-in-shard) scan, not an O(all-nodes) deserialize.
+    pub fn resolve_prefix(&self, prefix: &str) -> Result<NodeId, VasariError> {
+        if prefix.len() < 4 || !prefix.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(VasariError::InvalidNodeId(prefix.to_string()));
+        }
+        let lower = prefix.to_ascii_lowercase();
+        let (shard, rest) = lower.split_at(2);
+        let shard_dir = self.root.join("objects").join(shard);
+        if !shard_dir.exists() {
+            return Err(VasariError::NodeNotFound(prefix.to_string()));
+        }
+
+        let mut matches: Vec<NodeId> = Vec::new();
+        for entry in std::fs::read_dir(&shard_dir)? {
+            let entry = entry?;
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if fname.starts_with(rest) {
+                matches.push(NodeId(format!("{shard}{fname}")));
+            }
+        }
+
+        match matches.len() {
+            0 => Err(VasariError::NodeNotFound(prefix.to_string())),
+            1 => Ok(matches.pop().expect("len checked == 1")),
+            count => Err(VasariError::AmbiguousPrefix {
+                prefix: prefix.to_string(),
+                count,
+            }),
+        }
+    }
+
     /// Rebuild all indexes from the object store. Called by `vasari fsck`.
     pub fn rebuild_index(&self) -> Result<usize, VasariError> {
         let objects_dir = self.root.join("objects");
@@ -271,6 +314,69 @@ mod tests {
         assert!(found.contains(&attr_id));
         let not_found = store.lookup_attributions("src/auth.ts", 60).unwrap();
         assert!(not_found.is_empty());
+    }
+
+    #[test]
+    fn resolve_prefix_unique_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).unwrap();
+        let intent = Intent::new("s1".into(), "unique intent".into(), vec![]);
+        let full = store.put(&Node::Intent(intent)).unwrap();
+        let resolved = store.resolve_prefix(&full.as_str()[..10]).unwrap();
+        assert_eq!(resolved, full);
+        // Full id resolves to itself.
+        assert_eq!(store.resolve_prefix(full.as_str()).unwrap(), full);
+    }
+
+    #[test]
+    fn resolve_prefix_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).unwrap();
+        store
+            .put(&Node::Intent(Intent::new("s".into(), "x".into(), vec![])))
+            .unwrap();
+        // "ffff..." is valid hex but matches nothing in the (single-node) store.
+        let err = store.resolve_prefix(&"f".repeat(12)).unwrap_err();
+        assert!(matches!(err, VasariError::NodeNotFound(_)));
+    }
+
+    #[test]
+    fn resolve_prefix_rejects_short_and_non_hex_without_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).unwrap();
+        // Too short.
+        assert!(matches!(
+            store.resolve_prefix("ab").unwrap_err(),
+            VasariError::InvalidNodeId(_)
+        ));
+        // Empty.
+        assert!(matches!(
+            store.resolve_prefix("").unwrap_err(),
+            VasariError::InvalidNodeId(_)
+        ));
+        // Non-hex (would otherwise index a shard dir that can't exist).
+        assert!(matches!(
+            store.resolve_prefix("zzzz").unwrap_err(),
+            VasariError::InvalidNodeId(_)
+        ));
+    }
+
+    #[test]
+    fn resolve_prefix_ambiguous_reports_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).unwrap();
+        // Forge two nodes whose ids share a 6-char prefix in the same shard.
+        for suffix in ["aaaa", "bbbb"] {
+            let id = NodeId(format!("abcdef{}", suffix.repeat(14)));
+            let (dir_p, file_p) = store.object_path(&id).unwrap();
+            std::fs::create_dir_all(&dir_p).unwrap();
+            std::fs::write(&file_p, b"x").unwrap();
+        }
+        let err = store.resolve_prefix("abcdef").unwrap_err();
+        match err {
+            VasariError::AmbiguousPrefix { count, .. } => assert_eq!(count, 2),
+            other => panic!("expected AmbiguousPrefix, got {other:?}"),
+        }
     }
 
     #[test]
