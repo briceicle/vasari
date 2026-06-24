@@ -218,9 +218,9 @@ fn cmd_diff(store: &ObjectStore, plan_a_id: &str, plan_b_id: &str) -> Result<()>
 
         match (step_a, step_b) {
             (Some(a), Some(b)) => {
-                let goals_match = a.goal == b.goal
-                    || a.goal.contains(&b.goal as &str)
-                    || b.goal.contains(&a.goal as &str);
+                // Goals now carry the target (e.g. "Edit src/auth.rs"), so an
+                // exact comparison is meaningful — no substring fuzz needed.
+                let goals_match = a.goal == b.goal;
                 if !goals_match {
                     if !diverged {
                         println!("Plans diverge at step {} (1-indexed):", i + 1);
