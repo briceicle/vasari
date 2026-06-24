@@ -1,0 +1,12 @@
+{"file": "src/db.rs", "line": 1, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}
+{"file": "src/db.rs", "line": 2, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}
+{"file": "src/db.rs", "line": 3, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}
+{"file": "src/db.rs", "line": 4, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}
+{"file": "src/db.rs", "line": 5, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}
+{"file": "src/db.rs", "line": 6, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}
+{"file": "src/cache.rs", "line": 1, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}
+{"file": "src/cache.rs", "line": 2, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}
+{"file": "src/cache.rs", "line": 3, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}
+{"file": "src/cache.rs", "line": 4, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}
+{"file": "src/cache.rs", "line": 5, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}
+{"file": "src/cache.rs", "line": 6, "expected_intent": ["cache database query results in memory"], "confidence_threshold": 0.5}

@@ -1,0 +1,12 @@
+{"file": "src/schema.rs", "line": 1, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}
+{"file": "src/schema.rs", "line": 2, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}
+{"file": "src/schema.rs", "line": 3, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}
+{"file": "src/schema.rs", "line": 4, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}
+{"file": "src/schema.rs", "line": 5, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}
+{"file": "src/schema.rs", "line": 6, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}
+{"file": "src/validate.rs", "line": 1, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}
+{"file": "src/validate.rs", "line": 2, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}
+{"file": "src/validate.rs", "line": 3, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}
+{"file": "src/validate.rs", "line": 4, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}
+{"file": "src/validate.rs", "line": 5, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}
+{"file": "src/validate.rs", "line": 6, "expected_intent": ["validate request payloads with a schema"], "confidence_threshold": 0.5}

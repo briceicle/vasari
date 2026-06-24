@@ -1,0 +1,12 @@
+{"file": "src/auth.rs", "line": 1, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}
+{"file": "src/auth.rs", "line": 2, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}
+{"file": "src/auth.rs", "line": 3, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}
+{"file": "src/auth.rs", "line": 4, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}
+{"file": "src/auth.rs", "line": 5, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}
+{"file": "src/auth.rs", "line": 6, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}
+{"file": "src/token.rs", "line": 1, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}
+{"file": "src/token.rs", "line": 2, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}
+{"file": "src/token.rs", "line": 3, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}
+{"file": "src/token.rs", "line": 4, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}
+{"file": "src/token.rs", "line": 5, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}
+{"file": "src/token.rs", "line": 6, "expected_intent": ["add JWT verification to the auth module"], "confidence_threshold": 0.5}

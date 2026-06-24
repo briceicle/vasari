@@ -1,0 +1,12 @@
+{"file": "src/config.rs", "line": 1, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
+{"file": "src/config.rs", "line": 2, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
+{"file": "src/config.rs", "line": 3, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
+{"file": "src/config.rs", "line": 4, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
+{"file": "src/config.rs", "line": 5, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
+{"file": "src/config.rs", "line": 6, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
+{"file": "src/env.rs", "line": 1, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
+{"file": "src/env.rs", "line": 2, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
+{"file": "src/env.rs", "line": 3, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
+{"file": "src/env.rs", "line": 4, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
+{"file": "src/env.rs", "line": 5, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
+{"file": "src/env.rs", "line": 6, "expected_intent": ["add a config loader reading from env"], "confidence_threshold": 0.5}
