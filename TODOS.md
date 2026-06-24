@@ -24,29 +24,23 @@ Known deferred items as of v0.2.0.0.
 
 - [ ] **Python wheel** — maturin build + UniFFI bindings so `pip install vasari` works.
 
-- [~] **Attribution accuracy gate** — harness SHIPPED: `vasari_core::eval` (Wilson CI,
-  precision/recall, single-vs-multi-intent split), `tests/attribution_accuracy.rs`
-  (always-run synthetic + `#[ignore]`d real gate), `tests/corpus/attribution/run.sh`,
-  `SCRIPT.md`, `LABELING.md`, scrubber (`examples/scrub_session.rs`). REMAINING: generate
-  the scripted multi-intent corpus (≥100 labeled lines, ≥1 multi-intent file) per
-  `SCRIPT.md`, then `bash tests/corpus/attribution/run.sh` to evaluate the gate.
+- [x] **Attribution accuracy gate** — harness + committed corpus shipped (E7). Scripted
+  corpus via `tests/corpus/attribution/generate.py` (10 sessions, 115 labeled
+  `(file,line)` rows, `src/shared.rs` multi-intent). Gate: n=115, accuracy 100%,
+  Wilson95-lower 96.8% — PASS, enforced in CI. Grow the corpus by adding scripts.
 
 - [ ] **MCP ingest adapter** — parse MCP tool-call streams into the intent graph (v0.2+ per plan).
 
-## CI/CD (deferred from v0.1)
+## CI/CD
 
-- [ ] **GitHub Actions workflow** — `cargo test`, `cargo clippy`, `cargo fmt --check` on every
-  push. Separate release workflow: on tag `v*`, build binaries for `aarch64-darwin`,
-  `x86_64-linux`, `aarch64-linux`, publish to crates.io, create GitHub release.
-  Note: no Rust toolchain in the current dev environment — author the workflow file
-  and test it via GitHub Actions directly.
+- [x] **CI workflow** — `cargo fmt --check`, `cargo clippy -D warnings`, `cargo build`,
+  `cargo test`, and the attribution accuracy gate run on every push
+  (`.github/workflows/ci.yml`, ubuntu + macos).
+
+- [ ] **Release workflow** — on tag `v*`, build binaries for `aarch64-darwin`,
+  `x86_64-linux`, `aarch64-linux`, publish to crates.io, create a GitHub release.
 
 ## Known bugs (pre-existing, not blocking v0.1.x)
-
-- **`ObjectStore::object_path` panics on NodeIDs shorter than 2 chars** — the index
-  scanner reads raw lines from disk into `NodeId` without length validation; `&s[..2]`
-  panics on short or empty strings. Fix: validate in `object_path`, return
-  `VasariError::InvalidNodeId`. Introduced in v0.1.0.0.
 
 - **`encode_path` encodes `.` the same as `..`** — the guard
   `".." | "." => "%2E%2E"` maps both dot forms to the same string. A path component
