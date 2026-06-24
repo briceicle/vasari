@@ -126,8 +126,8 @@ pub fn run_pipeline(
     // --- Plan: one step per tool call ---
     let steps: Vec<PlanStep> = tool_calls
         .iter()
-        .map(|(name, _, _, _)| PlanStep {
-            goal: format!("invoke {name}"),
+        .map(|(name, args, _, _)| PlanStep {
+            goal: step_goal(name, args),
             constraints: vec![],
         })
         .collect();
@@ -193,6 +193,33 @@ pub fn redact_value(value: Value) -> Value {
                 .collect(),
         ),
         other => other,
+    }
+}
+
+/// Human-meaningful goal for a plan step: the tool plus its primary target,
+/// so `vasari diff` compares *what was done*, not just which tool ran.
+///
+/// File tools → `"Edit src/auth.rs"`. Other tools fall back to a short target
+/// hint (command / pattern / query, already redacted) or the bare tool name.
+fn step_goal(tool: &str, args: &Value) -> String {
+    if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
+        return format!("{tool} {path}");
+    }
+    let hint = args
+        .get("command")
+        .or_else(|| args.get("pattern"))
+        .or_else(|| args.get("query"))
+        .and_then(|v| v.as_str());
+    match hint {
+        Some(h) => {
+            let truncated: String = h.chars().take(60).collect();
+            if h.chars().count() > 60 {
+                format!("{tool} {truncated}…")
+            } else {
+                format!("{tool} {truncated}")
+            }
+        }
+        None => tool.to_string(),
     }
 }
 
@@ -285,6 +312,54 @@ mod tests {
         assert_eq!(summary.actions_created, 1);
         assert_eq!(summary.attributions_created, 1);
         assert!(summary.degraded.is_empty());
+    }
+
+    #[test]
+    fn step_goal_carries_file_path_and_falls_back() {
+        assert_eq!(
+            step_goal("Edit", &json!({ "file_path": "src/auth.rs" })),
+            "Edit src/auth.rs"
+        );
+        assert_eq!(
+            step_goal("Bash", &json!({ "command": "cargo test" })),
+            "Bash cargo test"
+        );
+        assert_eq!(
+            step_goal("Grep", &json!({ "pattern": "TODO" })),
+            "Grep TODO"
+        );
+        // No target hint → bare tool name.
+        assert_eq!(step_goal("Read", &json!({})), "Read");
+        // Long hints are truncated with an ellipsis.
+        let long = "x".repeat(80);
+        let goal = step_goal("Bash", &json!({ "command": long }));
+        assert!(goal.starts_with("Bash "));
+        assert!(goal.ends_with('…'));
+    }
+
+    #[test]
+    fn plan_step_goal_reflects_edited_file() {
+        let (store, _dir) = make_store();
+        let events = vec![
+            IngestEvent::UserPrompt {
+                text: "do the thing".into(),
+                timestamp: Utc::now(),
+            },
+            IngestEvent::ToolCall {
+                name: "Edit".into(),
+                args: json!({ "file_path": "src/auth.rs", "old_string": "a", "new_string": "b" }),
+                result_summary: String::new(),
+                timestamp: Utc::now(),
+            },
+        ];
+        run_pipeline(events, &store).unwrap();
+        let plan = store
+            .iter_all()
+            .unwrap()
+            .into_iter()
+            .find_map(|n| if let Node::Plan(p) = n { Some(p) } else { None })
+            .expect("a plan was created");
+        assert_eq!(plan.steps[0].goal, "Edit src/auth.rs");
     }
 
     #[test]
