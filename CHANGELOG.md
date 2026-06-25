@@ -9,6 +9,22 @@ Version scheme: `MAJOR.MINOR.PATCH.BUILD` (gstack convention).
 
 ## [Unreleased]
 
+### Changed
+
+**vasari-core** — attribution quality on real sessions. With the parser fixed,
+`vasari why` resolved every line to the session's umbrella prompt with a generic
+`Edit <file>` step, and ingested context-compaction recaps as if they were intents:
+
+- **Plan steps now carry the agent's stated rationale.** The `text`/`thinking`
+  narration that precedes a tool call (in real sessions, in its own record) is
+  threaded through `IngestEvent::ToolCall` and becomes the plan-step goal, so
+  `vasari why`'s "via" line reads e.g. *"add a shared path validator"* instead of
+  *"Edit src/foo.rs"*. Falls back to the `<tool> <path>` label when absent.
+- **Auto-generated `user` turns are no longer treated as intents.** Context
+  compaction recaps ("This session is being continued…") and local-command
+  output caveats are filtered, so they no longer surface as multi-paragraph
+  "why" answers.
+
 ### Fixed
 
 **vasari-core** (`crates/vasari-core`) — `vasari why` returned **zero attributions

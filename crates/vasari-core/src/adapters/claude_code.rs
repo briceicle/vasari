@@ -73,6 +73,13 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
         collect_tool_results(record, &mut results);
     }
 
+    // The agent's stated reason for the tool calls that follow it. Real sessions
+    // split each `thinking` / `text` / `tool_use` block into its *own* assistant
+    // record, so rationale must be tracked across records (in document order),
+    // not within a single message. Reset at each new user turn so one turn's
+    // rationale never bleeds into the next.
+    let mut rationale: Option<String> = None;
+
     // Pass 2: emit events in document order.
     for record in &records {
         // Extract timestamp from the record (top-level "timestamp" field).
@@ -127,6 +134,12 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
                     if is_boilerplate(&text) {
                         continue;
                     }
+                    // Skip auto-generated "user" turns (context-compaction recaps,
+                    // local-command output) — these are not the developer's intent
+                    // and otherwise pollute `vasari why` with multi-paragraph noise.
+                    if is_synthetic_user_text(&text) {
+                        continue;
+                    }
 
                     let ts = record
                         .get("timestamp")
@@ -145,6 +158,9 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
                         session_source = Some(source_label);
                         found_intent = true;
                     }
+
+                    // A new turn begins — the agent hasn't stated a reason yet.
+                    rationale = None;
 
                     events.push(IngestEvent::UserPrompt {
                         text,
@@ -165,12 +181,37 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
 
                 let content = message.get("content");
                 if let Some(content_arr) = content.and_then(|c| c.as_array()) {
+                    // The agent narrates its reason in a `text` (or `thinking`)
+                    // block, then issues the `tool_use` — usually in the *next*
+                    // record. Carry the most recent narration forward as the
+                    // rationale for the calls that follow it.
                     for block in content_arr {
-                        if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
-                            if let Some(ev) = parse_tool_use_block(block, timestamp, &results, cwd)
-                            {
-                                events.push(ev);
+                        match block.get("type").and_then(|v| v.as_str()) {
+                            Some("text") | Some("thinking") => {
+                                let field = if block.get("text").is_some() {
+                                    "text"
+                                } else {
+                                    "thinking"
+                                };
+                                if let Some(t) = block.get(field).and_then(|v| v.as_str()) {
+                                    let t = t.trim();
+                                    if !t.is_empty() {
+                                        rationale = Some(t.to_string());
+                                    }
+                                }
                             }
+                            Some("tool_use") => {
+                                if let Some(ev) = parse_tool_use_block(
+                                    block,
+                                    timestamp,
+                                    &results,
+                                    cwd,
+                                    rationale.as_deref(),
+                                ) {
+                                    events.push(ev);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -247,6 +288,7 @@ fn parse_tool_use_block(
     timestamp: DateTime<Utc>,
     results: &HashMap<String, String>,
     cwd: Option<&str>,
+    rationale: Option<&str>,
 ) -> Option<IngestEvent> {
     let name = block.get("name").and_then(|v| v.as_str())?.to_string();
 
@@ -288,6 +330,7 @@ fn parse_tool_use_block(
         args,
         result_summary,
         timestamp,
+        rationale: rationale.map(str::to_string),
     })
 }
 
@@ -378,6 +421,22 @@ fn is_boilerplate(text: &str) -> bool {
     BOILERPLATE.contains(&lower.as_str())
 }
 
+/// Auto-generated "user" turns that aren't the developer's intent: context
+/// compaction recaps and local-command output that Claude Code injects as user
+/// messages. Treating these as intents fills `vasari why` with multi-paragraph
+/// summaries instead of the actual request.
+fn is_synthetic_user_text(text: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "This session is being continued from a previous conversation",
+        "Caveat: The messages below were generated by the user while running",
+    ];
+    let trimmed = text.trim_start();
+    PREFIXES.iter().any(|p| trimmed.starts_with(p))
+        // Local slash-command output is wrapped in these tags.
+        || trimmed.starts_with("<command-name>")
+        || trimmed.starts_with("<local-command-stdout>")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,6 +487,57 @@ mod tests {
             _ => None,
         });
         assert_eq!(path.as_deref(), Some("src/auth.rs"));
+    }
+
+    #[test]
+    fn skips_synthetic_user_turns() {
+        // Context-compaction recaps and command-output caveats are injected as
+        // `user` records but are not the developer's intent.
+        assert!(is_synthetic_user_text(
+            "This session is being continued from a previous conversation that ran out of context.\n\nSummary:\n1. ..."
+        ));
+        assert!(is_synthetic_user_text(
+            "Caveat: The messages below were generated by the user while running local commands. DO NOT respond..."
+        ));
+        assert!(is_synthetic_user_text(
+            "<command-name>/clear</command-name>"
+        ));
+        // A genuine request is not synthetic.
+        assert!(!is_synthetic_user_text(
+            "Add JWT verification to the auth module"
+        ));
+    }
+
+    #[test]
+    fn compaction_summary_does_not_become_an_intent() {
+        let jsonl = r#"{"type":"user","timestamp":"2026-01-01T00:00:00Z","uuid":"u1","cwd":"/r","message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context.\n\nSummary: lots of recap text."}}
+{"type":"user","timestamp":"2026-01-01T00:01:00Z","uuid":"u2","cwd":"/r","message":{"role":"user","content":"Add rate limiting to the API"}}"#;
+        let events = parse_jsonl(Cursor::new(jsonl)).unwrap();
+        let prompts: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                IngestEvent::UserPrompt { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(prompts, vec!["Add rate limiting to the API"]);
+    }
+
+    #[test]
+    fn tool_use_captures_preceding_assistant_text_as_rationale() {
+        // The text block immediately before a tool_use is the agent's stated
+        // reason for the call.
+        let jsonl = r#"{"type":"user","timestamp":"2026-01-01T00:00:00Z","uuid":"u1","cwd":"/r","message":{"role":"user","content":"fix auth"}}
+{"type":"assistant","timestamp":"2026-01-01T00:00:01Z","cwd":"/r","message":{"role":"assistant","content":[{"type":"text","text":"Now I'll add the JWT signature check."},{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"/r/src/auth.rs","old_string":"a","new_string":"b"}}]}}"#;
+        let events = parse_jsonl(Cursor::new(jsonl)).unwrap();
+        let rationale = events.iter().find_map(|e| match e {
+            IngestEvent::ToolCall { rationale, .. } => Some(rationale.clone()),
+            _ => None,
+        });
+        assert_eq!(
+            rationale,
+            Some(Some("Now I'll add the JWT signature check.".to_string()))
+        );
     }
 
     #[test]
