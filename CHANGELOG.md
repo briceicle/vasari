@@ -27,6 +27,15 @@ Version scheme: `MAJOR.MINOR.PATCH.BUILD` (gstack convention).
 
 ### Fixed
 
+**vasari-core** — `:line` precision on real sessions. Claude Code returns Read
+results in `cat -n` form (line-number + tab prefix per line), so an Edit's raw
+`old_string` never matched the captured file content and **every** Edit degraded
+to a whole-file attribution at 0.7 confidence — `:line` resolution was illusory.
+Read content is now de-numbered before locating edits, so edits with a prior
+in-session Read resolve to exact line ranges (confidence 1.0). On a real session
+this took exact-range coverage from 0% to ~half of covered lines; the remainder
+(no in-session Read to locate against) still degrade honestly to whole-file.
+
 **vasari-core** (`crates/vasari-core`) — `vasari why` returned **zero attributions
 on real Claude Code sessions**. Three compounding parser bugs, each masked by the
 synthetic `"human"`-typed test fixtures:
