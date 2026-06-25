@@ -37,31 +37,78 @@ SCRIPTS = [
 
 SHARED = "src/shared.rs"
 
+# The corpus mirrors the *real* Claude Code on-disk schema so the gate exercises
+# the same ingest paths real sessions hit (and would have caught the bugs that
+# the old "human"/relative-path/plain-read corpus silently passed):
+#   • records are typed "user" (not "human");
+#   • tool file_paths are absolute, under a per-record `cwd`;
+#   • Read results are in `cat -n` form (line-number + tab prefix).
+# It is still fully synthetic — ground truth is known by construction, with no
+# real prompts, paths, secrets, or third-party code.
+CWD = "/work/repo"
+
+
+def file_lines(f):
+    """The N source lines a file holds (stable, content-addressable by line)."""
+    return [f"// {f} line {k}" for k in range(1, LINES_PER_FILE + 1)]
+
+
+def cat_n(lines):
+    """Render lines the way Claude Code's Read tool returns them."""
+    return "\n".join(f"{k:>6}\t{ln}" for k, ln in enumerate(lines, start=1))
+
 
 def session_records(sid, prompt, files):
-    """A minimal but well-formed Claude Code session: prompt + Edit per file,
-    each with its tool_result in the following human record (exercises E4)."""
+    """A well-formed real-schema Claude Code session: prompt, then for each file a
+    Read (cat -n result) followed by an Edit that rewrites the whole known block,
+    each tool_use answered by a tool_result in the following user record.
+
+    The Edit's old_string is the de-numbered file body, so the attribution
+    resolves to an exact LineRange 1..N (covering every labeled line) — exercising
+    the cat -n strip + range location, not just the whole-file degrade path."""
     recs = [{
-        "type": "human", "timestamp": f"2024-02-01T10:00:00Z",
-        "uuid": f"{sid}-u0", "parentUuid": None,
+        "type": "user", "timestamp": "2024-02-01T10:00:00Z",
+        "uuid": f"{sid}-u0", "parentUuid": None, "cwd": CWD,
         "message": {"role": "user", "content": prompt},
     }]
     for i, f in enumerate(files):
-        tid = f"{sid}-t{i}"
+        abspath = f"{CWD}/{f}"
+        lines = file_lines(f)
+        body = "\n".join(lines)
+        read_id, edit_id = f"{sid}-read{i}", f"{sid}-edit{i}"
+        # Read the file (result comes back cat -n formatted).
         recs.append({
             "type": "assistant", "timestamp": "2024-02-01T10:00:01Z",
-            "uuid": f"{sid}-a{i}", "parentUuid": f"{sid}-u0",
+            "uuid": f"{sid}-ar{i}", "parentUuid": f"{sid}-u0", "cwd": CWD,
             "message": {"role": "assistant", "content": [
-                {"type": "tool_use", "id": tid, "name": "Edit",
-                 "input": {"file_path": f, "old_string": "// old", "new_string": "// new"}},
+                {"type": "tool_use", "id": read_id, "name": "Read",
+                 "input": {"file_path": abspath}},
             ]},
         })
         recs.append({
-            "type": "human", "timestamp": "2024-02-01T10:00:02Z",
-            "uuid": f"{sid}-r{i}", "parentUuid": f"{sid}-a{i}",
+            "type": "user", "timestamp": "2024-02-01T10:00:02Z",
+            "uuid": f"{sid}-rr{i}", "parentUuid": f"{sid}-ar{i}", "cwd": CWD,
             "message": {"role": "user", "content": [
-                {"type": "tool_result", "tool_use_id": tid,
-                 "content": [{"type": "text", "text": f"The file {f} has been updated successfully."}]},
+                {"type": "tool_result", "tool_use_id": read_id,
+                 "content": [{"type": "text", "text": cat_n(lines)}]},
+            ]},
+        })
+        # Rewrite the whole block → exact LineRange 1..LINES_PER_FILE.
+        recs.append({
+            "type": "assistant", "timestamp": "2024-02-01T10:00:03Z",
+            "uuid": f"{sid}-ae{i}", "parentUuid": f"{sid}-rr{i}", "cwd": CWD,
+            "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": edit_id, "name": "Edit",
+                 "input": {"file_path": abspath, "old_string": body,
+                           "new_string": body + "  // edited"}},
+            ]},
+        })
+        recs.append({
+            "type": "user", "timestamp": "2024-02-01T10:00:04Z",
+            "uuid": f"{sid}-re{i}", "parentUuid": f"{sid}-ae{i}", "cwd": CWD,
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": edit_id,
+                 "content": [{"type": "text", "text": f"The file {abspath} has been updated successfully."}]},
             ]},
         })
     return recs

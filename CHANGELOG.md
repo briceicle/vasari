@@ -24,6 +24,15 @@ Version scheme: `MAJOR.MINOR.PATCH.BUILD` (gstack convention).
   compaction recaps ("This session is being continued…") and local-command
   output caveats are filtered, so they no longer surface as multi-paragraph
   "why" answers.
+- **Accuracy gate now exercises the real on-disk schema.** The scripted corpus
+  (`generate.py`) emitted `"human"`-typed records with relative paths and plain
+  Read results — so the gate passed at "100%" even while real-session ingest was
+  fully broken. The corpus now mirrors what Claude Code actually writes (`"user"`
+  records, absolute paths under `cwd`, `cat -n` Read results, Read-then-Edit so
+  attributions land on exact line ranges). Still fully synthetic (no privacy
+  blast radius); gate stays green at n=115. The gate also merges an opt-in,
+  gitignored local corpus (`sessions-local/` + `labels-local/`) so developers can
+  score it against their own scrubbed real sessions — see `LABELING.md`.
 
 ### Fixed
 

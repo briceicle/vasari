@@ -6,6 +6,17 @@ capture of real user sessions. Every session is synthetic and authored by
 construction and there is no privacy/IP blast radius (no real prompts, paths,
 secrets, or third-party code).
 
+**Real on-disk schema.** Sessions mirror what Claude Code actually writes —
+records typed `"user"`, absolute tool `file_path`s under a per-record `cwd`, and
+Read results in `cat -n` form — so the gate exercises the real ingest paths (the
+earlier `"human"`/relative-path/plain-read corpus silently passed even when those
+paths were broken). Each file is Read then wholly rewritten, so attributions
+resolve to exact line ranges rather than whole-file degrades.
+
+**Dogfooding on real sessions:** to score the gate against your own scrubbed real
+sessions, see the local-corpus workflow in `LABELING.md` (`sessions-local/` +
+`labels-local/`, both gitignored).
+
 - **Sessions:** `sessions/sNN.jsonl` — one clear intent each (one prompt + edits).
 - **Multi-intent stress case:** `src/shared.rs` is edited by `s01` and `s02`, so
   `why` must contend with two intents on one file.
