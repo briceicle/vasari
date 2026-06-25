@@ -2,8 +2,10 @@
 ///
 /// Claude Code writes each conversation turn as a newline-delimited JSON record
 /// at `~/.claude/projects/<session>/<timestamp>.jsonl`.  Each record has a
-/// top-level `type` ("human" | "assistant" | "summary" | "system") and a
-/// `message` sub-object in the Claude Messages API format.
+/// top-level `type` ("user" | "assistant" | "summary" | "system"; older exports
+/// used "human" for the user turn, still accepted) and a `message` sub-object in
+/// the Claude Messages API format. User/assistant records also carry a `cwd`,
+/// against which absolute tool `file_path`s are relativized at ingest.
 ///
 /// Filtering rules that match the ingest plan:
 ///   • Skip records whose user message begins with "/" (slash-command invocations).
@@ -104,7 +106,7 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
                     });
                 }
             }
-            "human" => {
+            "human" | "user" => {
                 // Human / user turn.  May contain a user text message or tool results.
                 let message = match record.get("message") {
                     Some(m) => m,
@@ -157,11 +159,16 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
                     None => continue,
                 };
 
+                // Claude Code records the agent's working directory per record;
+                // tool `file_path`s are absolute, so relativize against it.
+                let cwd = record.get("cwd").and_then(|v| v.as_str());
+
                 let content = message.get("content");
                 if let Some(content_arr) = content.and_then(|c| c.as_array()) {
                     for block in content_arr {
                         if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
-                            if let Some(ev) = parse_tool_use_block(block, timestamp, &results) {
+                            if let Some(ev) = parse_tool_use_block(block, timestamp, &results, cwd)
+                            {
                                 events.push(ev);
                             }
                         }
@@ -223,10 +230,23 @@ fn extract_text_from_record(record: &Value) -> Option<String> {
     extract_user_text(message.get("content"))
 }
 
+/// Make an absolute tool `file_path` repo-relative by stripping the agent's
+/// working directory. Already-relative paths pass through unchanged.
+fn relativize(path: &str, cwd: Option<&str>) -> String {
+    if let Some(cwd) = cwd {
+        let prefix = format!("{}/", cwd.trim_end_matches('/'));
+        if let Some(rest) = path.strip_prefix(&prefix) {
+            return rest.to_string();
+        }
+    }
+    path.to_string()
+}
+
 fn parse_tool_use_block(
     block: &Value,
     timestamp: DateTime<Utc>,
     results: &HashMap<String, String>,
+    cwd: Option<&str>,
 ) -> Option<IngestEvent> {
     let name = block.get("name").and_then(|v| v.as_str())?.to_string();
 
@@ -236,17 +256,21 @@ fn parse_tool_use_block(
         _ => return None,
     }
 
-    let args = block
+    let mut args = block
         .get("input")
         .cloned()
         .unwrap_or(Value::Object(Default::default()));
 
-    // For tools with paths, validate the path doesn't escape the repo
-    // (shared rule — see ingest::is_safe_path).
+    // Tool `file_path`s are absolute in real sessions; relativize against the
+    // record's cwd so they match the repo-relative paths `vasari why` queries.
     if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
-        if !crate::ingest::is_safe_path(path) {
+        let rel = relativize(path, cwd);
+        // For tools with paths, validate the path doesn't escape the repo
+        // (shared rule — see ingest::is_safe_path).
+        if !crate::ingest::is_safe_path(&rel) {
             return None;
         }
+        args["file_path"] = Value::String(rel);
     }
 
     // Correlate this tool_use with its tool_result (keyed by id). For Read this
@@ -271,7 +295,8 @@ fn parse_tool_use_block(
 /// Claude Code attaches each tool's result to the *following* human turn as a
 /// `tool_result` block keyed by `tool_use_id`.
 fn collect_tool_results(record: &Value, out: &mut HashMap<String, String>) {
-    if record.get("type").and_then(|v| v.as_str()) != Some("human") {
+    let rt = record.get("type").and_then(|v| v.as_str());
+    if rt != Some("human") && rt != Some("user") {
         return;
     }
     let Some(content) = record
@@ -357,6 +382,53 @@ fn is_boilerplate(text: &str) -> bool {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn relativize_strips_cwd_prefix() {
+        assert_eq!(
+            relativize("/Users/dev/repo/src/auth.rs", Some("/Users/dev/repo")),
+            "src/auth.rs"
+        );
+        // Trailing slash on cwd is tolerated.
+        assert_eq!(
+            relativize("/Users/dev/repo/src/auth.rs", Some("/Users/dev/repo/")),
+            "src/auth.rs"
+        );
+        // Already-relative paths pass through.
+        assert_eq!(
+            relativize("src/auth.rs", Some("/Users/dev/repo")),
+            "src/auth.rs"
+        );
+        // Path outside cwd is left untouched (is_safe_path rejects it later).
+        assert_eq!(
+            relativize("/etc/passwd", Some("/Users/dev/repo")),
+            "/etc/passwd"
+        );
+        // No cwd → unchanged.
+        assert_eq!(relativize("src/auth.rs", None), "src/auth.rs");
+    }
+
+    #[test]
+    fn parses_user_type_records_with_absolute_paths() {
+        // Real Claude Code sessions use `type:"user"` (not `"human"`) and record
+        // absolute file_paths under a per-record `cwd`. Both must be handled.
+        let jsonl = r#"{"type":"user","timestamp":"2026-01-01T00:00:00Z","uuid":"u1","cwd":"/Users/dev/repo","message":{"role":"user","content":"Add JWT verification"}}
+{"type":"assistant","timestamp":"2026-01-01T00:00:01Z","cwd":"/Users/dev/repo","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"/Users/dev/repo/src/auth.rs","old_string":"a","new_string":"b"}}]}}"#;
+        let events = parse_jsonl(Cursor::new(jsonl)).unwrap();
+        // The user prompt becomes an intent-bearing UserPrompt.
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, IngestEvent::UserPrompt { text, .. } if text.contains("JWT"))));
+        // The Edit survives and its path is repo-relative.
+        let path = events.iter().find_map(|e| match e {
+            IngestEvent::ToolCall { name, args, .. } if name == "Edit" => args
+                .get("file_path")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            _ => None,
+        });
+        assert_eq!(path.as_deref(), Some("src/auth.rs"));
+    }
 
     #[test]
     fn tool_result_is_correlated_into_tool_call() {

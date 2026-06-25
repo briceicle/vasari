@@ -7,6 +7,30 @@ Version scheme: `MAJOR.MINOR.PATCH.BUILD` (gstack convention).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+**vasari-core** (`crates/vasari-core`) — `vasari why` returned **zero attributions
+on real Claude Code sessions**. Three compounding parser bugs, each masked by the
+synthetic `"human"`-typed test fixtures:
+
+- **Record type.** The adapter only matched `type:"human"`, but real sessions emit
+  `type:"user"`. Every user turn — including the one that becomes the session
+  Intent — was skipped, so ingest produced nothing. Both spellings are now accepted.
+- **Absolute paths dropped.** Real sessions record absolute tool `file_path`s; the
+  shared `is_safe_path` check rejected anything starting with `/`, so every
+  Edit/Write/Read was discarded at the adapter and again in the attribution
+  synthesizer. Paths are now relativized against each record's `cwd` before the
+  safety check.
+- **Query/storage path mismatch.** Even when stored, absolute paths never matched
+  the repo-relative path `vasari why <path>` queries with. Relativization fixes
+  this end-to-end.
+
+- `tests/fixtures/claude_code/real-session-shape.jsonl` + `ingest_integration`
+  regression test mirroring the real on-disk schema (`user` type, `cwd`, absolute
+  paths) so these regressions fail loudly; unit tests for `relativize`.
+
 ## [0.2.1.0] — 2026-06-24
 
 ### Added
