@@ -214,6 +214,8 @@ fn child_span_to_event(span: &Value) -> Option<IngestEvent> {
         args: Value::Object(args),
         result_summary,
         timestamp,
+        // OTEL GenAI spans carry no free-text agent rationale.
+        rationale: None,
     })
 }
 

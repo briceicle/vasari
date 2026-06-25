@@ -39,6 +39,11 @@ pub enum IngestEvent {
         args: Value,
         result_summary: String,
         timestamp: DateTime<Utc>,
+        /// The agent's stated reason for this call, if any — the nearest
+        /// preceding assistant text (e.g. "Now I'll add the JWT check"). Becomes
+        /// the plan step goal so `vasari why` shows the specific intent behind a
+        /// line rather than a generic "Edit <file>" label.
+        rationale: Option<String>,
     },
     /// System-level instruction (e.g., CLAUDE.md content, session preamble).
     SystemInstruction { text: String },
@@ -60,8 +65,8 @@ pub trait IngestAdapter {
     fn parse(&self, source: IngestSource) -> Result<Vec<IngestEvent>, VasariError>;
 }
 
-/// A redacted tool call: (tool name, args, result summary, timestamp).
-type ToolCallData = (String, Value, String, DateTime<Utc>);
+/// A redacted tool call: (tool name, args, result summary, timestamp, rationale).
+type ToolCallData = (String, Value, String, DateTime<Utc>, Option<String>);
 
 /// Whether a tool-call file path is safe to ingest. Single source of truth for
 /// path safety, shared by every adapter and the attribution synthesizer so the
@@ -119,8 +124,15 @@ pub fn run_pipeline(
                 args,
                 result_summary,
                 timestamp,
+                rationale,
             } => {
-                let tc = (name, redact_value(args), redact(&result_summary), timestamp);
+                let tc = (
+                    name,
+                    redact_value(args),
+                    redact(&result_summary),
+                    timestamp,
+                    rationale.map(|r| redact(&r)),
+                );
                 match turns.last_mut() {
                     Some(turn) => turn.tools.push(tc),
                     None => pre_prompt_tools.push(tc),
@@ -172,8 +184,8 @@ pub fn run_pipeline(
         let steps: Vec<PlanStep> = turn
             .tools
             .iter()
-            .map(|(name, args, _, _)| PlanStep {
-                goal: step_goal(name, args),
+            .map(|(name, args, _, _, rationale)| PlanStep {
+                goal: step_goal(name, args, rationale.as_deref()),
                 constraints: vec![],
             })
             .collect();
@@ -184,7 +196,9 @@ pub fn run_pipeline(
         plan_ids.push(plan_id.clone());
 
         // --- Actions + Attributions for this turn ---
-        for (step_index, (name, args, result_summary, timestamp)) in turn.tools.iter().enumerate() {
+        for (step_index, (name, args, result_summary, timestamp, _rationale)) in
+            turn.tools.iter().enumerate()
+        {
             // A Read result is the file's content as the agent saw it — record it
             // so a later Edit can be located against it.
             if name == "Read" {
@@ -281,7 +295,19 @@ fn truncate_summary(s: &str) -> String {
 ///
 /// File tools → `"Edit src/auth.rs"`. Other tools fall back to a short target
 /// hint (command / pattern / query, already redacted) or the bare tool name.
-fn step_goal(tool: &str, args: &Value) -> String {
+fn step_goal(tool: &str, args: &Value, rationale: Option<&str>) -> String {
+    // The agent's own stated reason is the most specific goal available.
+    if let Some(r) = rationale {
+        let r = r.trim();
+        if !r.is_empty() {
+            let truncated: String = r.chars().take(120).collect();
+            return if r.chars().count() > 120 {
+                format!("{truncated}…")
+            } else {
+                truncated
+            };
+        }
+    }
     if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
         return format!("{tool} {path}");
     }
@@ -491,6 +517,7 @@ mod tests {
                 args: json!({ "file_path": "src/auth.rs", "old_string": "", "new_string": "" }),
                 result_summary: "Edited src/auth.rs".into(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
         ];
 
@@ -535,6 +562,7 @@ mod tests {
                 args: json!({ "file_path": "src/new.rs", "content": content }),
                 result_summary: "New file created".into(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
         ];
         run_pipeline(events, &store).unwrap();
@@ -561,12 +589,14 @@ mod tests {
                 args: json!({ "file_path": "src/x.rs" }),
                 result_summary: file.into(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
             IngestEvent::ToolCall {
                 name: "Edit".into(),
                 args: json!({ "file_path": "src/x.rs", "old_string": "fn c() {}", "new_string": "fn c() { c2(); }" }),
                 result_summary: "ok".into(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
         ];
         run_pipeline(events, &store).unwrap();
@@ -593,6 +623,7 @@ mod tests {
                 args: json!({ "file_path": "src/y.rs", "old_string": "a", "new_string": "b" }),
                 result_summary: String::new(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
         ];
         run_pipeline(events, &store).unwrap();
@@ -634,6 +665,7 @@ mod tests {
                 args: json!({ "file_path": "src/auth.rs", "old_string": "a", "new_string": "b" }),
                 result_summary: String::new(),
                 timestamp: t0,
+                rationale: None,
             },
             IngestEvent::UserPrompt {
                 text: "Now refactor the date helpers".into(),
@@ -644,6 +676,7 @@ mod tests {
                 args: json!({ "file_path": "src/dates.rs", "old_string": "c", "new_string": "d" }),
                 result_summary: String::new(),
                 timestamp: t0,
+                rationale: None,
             },
         ];
         let summary = run_pipeline(events, &store).unwrap();
@@ -678,6 +711,7 @@ mod tests {
                 args: json!({ "file_path": "src/early.rs", "old_string": "a", "new_string": "b" }),
                 result_summary: String::new(),
                 timestamp: t0,
+                rationale: None,
             },
             IngestEvent::UserPrompt {
                 text: "the actual first prompt".into(),
@@ -699,24 +733,48 @@ mod tests {
     #[test]
     fn step_goal_carries_file_path_and_falls_back() {
         assert_eq!(
-            step_goal("Edit", &json!({ "file_path": "src/auth.rs" })),
+            step_goal("Edit", &json!({ "file_path": "src/auth.rs" }), None),
             "Edit src/auth.rs"
         );
         assert_eq!(
-            step_goal("Bash", &json!({ "command": "cargo test" })),
+            step_goal("Bash", &json!({ "command": "cargo test" }), None),
             "Bash cargo test"
         );
         assert_eq!(
-            step_goal("Grep", &json!({ "pattern": "TODO" })),
+            step_goal("Grep", &json!({ "pattern": "TODO" }), None),
             "Grep TODO"
         );
         // No target hint → bare tool name.
-        assert_eq!(step_goal("Read", &json!({})), "Read");
+        assert_eq!(step_goal("Read", &json!({}), None), "Read");
         // Long hints are truncated with an ellipsis.
         let long = "x".repeat(80);
-        let goal = step_goal("Bash", &json!({ "command": long }));
+        let goal = step_goal("Bash", &json!({ "command": long }), None);
         assert!(goal.starts_with("Bash "));
         assert!(goal.ends_with('…'));
+    }
+
+    #[test]
+    fn step_goal_prefers_agent_rationale_over_file_path() {
+        // The agent's stated reason is the most specific goal — it wins over the
+        // generic "<tool> <path>" fallback.
+        assert_eq!(
+            step_goal(
+                "Edit",
+                &json!({ "file_path": "src/auth.rs" }),
+                Some("Add the JWT signature check before the user lookup"),
+            ),
+            "Add the JWT signature check before the user lookup"
+        );
+        // Empty/whitespace rationale falls back to the path label.
+        assert_eq!(
+            step_goal("Edit", &json!({ "file_path": "src/auth.rs" }), Some("   ")),
+            "Edit src/auth.rs"
+        );
+        // Long rationale is truncated with an ellipsis.
+        let long = "y".repeat(200);
+        let goal = step_goal("Edit", &json!({ "file_path": "src/x.rs" }), Some(&long));
+        assert!(goal.ends_with('…'));
+        assert!(goal.chars().count() <= 121);
     }
 
     #[test]
@@ -732,6 +790,7 @@ mod tests {
                 args: json!({ "file_path": "src/auth.rs", "old_string": "a", "new_string": "b" }),
                 result_summary: String::new(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
         ];
         run_pipeline(events, &store).unwrap();
@@ -771,6 +830,7 @@ mod tests {
                 args: json!({ "file_path": "../escape/path.rs" }),
                 result_summary: String::new(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
         ];
 
@@ -791,6 +851,7 @@ mod tests {
                 args: json!({ "file_path": "src/lib.rs" }),
                 result_summary: String::new(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
         ];
         let summary = run_pipeline(events, &store).unwrap();
@@ -810,6 +871,7 @@ mod tests {
                 args: json!({ "command": "cargo test" }),
                 result_summary: "all tests passed".into(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
         ];
         let summary = run_pipeline(events, &store).unwrap();
@@ -832,18 +894,21 @@ mod tests {
                 args: json!({ "file_path": "src/auth.rs" }),
                 result_summary: String::new(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
             IngestEvent::ToolCall {
                 name: "Write".into(),
                 args: json!({ "file_path": "src/jwt.rs" }),
                 result_summary: String::new(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
             IngestEvent::ToolCall {
                 name: "Bash".into(),
                 args: json!({ "command": "cargo test" }),
                 result_summary: String::new(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
         ];
         let summary = run_pipeline(events, &store).unwrap();
@@ -868,6 +933,7 @@ mod tests {
                 args: json!({ "file_path": "config.toml", "new_content": secret }),
                 result_summary: String::new(),
                 timestamp: Utc::now(),
+                rationale: None,
             },
         ];
         run_pipeline(events, &store).unwrap();
