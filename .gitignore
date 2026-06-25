@@ -2,3 +2,8 @@
 .vasari/
 *.orig
 .DS_Store
+
+# Opt-in local accuracy corpus: scrubbed real sessions + labels for dogfooding
+# the gate on real data. Never committed (privacy/IP); see LABELING.md.
+/tests/corpus/attribution/sessions-local/
+/tests/corpus/attribution/labels-local/

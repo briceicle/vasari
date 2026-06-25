@@ -105,14 +105,18 @@ fn evaluator_scores_synthetic_corpus() {
 #[ignore = "needs committed corpus; run: bash tests/corpus/attribution/run.sh"]
 fn attribution_accuracy_gate() {
     let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/attribution");
-    let sessions_dir = corpus.join("sessions");
-    let labels_dir = corpus.join("labels");
-
-    let session_files = jsonl_files(&sessions_dir);
+    // The committed corpus is synthetic-but-real-schema. A developer can ALSO
+    // dogfood against their own scrubbed real sessions by dropping them in the
+    // gitignored `sessions-local/` + `labels-local/` dirs (see LABELING.md);
+    // when present they are merged in, so the gate scores real + synthetic.
+    let session_files: Vec<PathBuf> = jsonl_files(&corpus.join("sessions"))
+        .into_iter()
+        .chain(jsonl_files(&corpus.join("sessions-local")))
+        .collect();
     assert!(
         !session_files.is_empty(),
         "no corpus sessions in {} — generate them via tests/corpus/attribution/SCRIPT.md",
-        sessions_dir.display()
+        corpus.join("sessions").display()
     );
 
     let dir = tempfile::tempdir().unwrap();
@@ -124,8 +128,11 @@ fn attribution_accuracy_gate() {
         run_pipeline(events, &store).unwrap_or_else(|e| panic!("ingesting {}: {e}", s.display()));
     }
 
+    let label_files = jsonl_files(&corpus.join("labels"))
+        .into_iter()
+        .chain(jsonl_files(&corpus.join("labels-local")));
     let mut labels = Vec::new();
-    for l in jsonl_files(&labels_dir) {
+    for l in label_files {
         let text = fs::read_to_string(&l).unwrap();
         labels.extend(
             parse_labels(&text).unwrap_or_else(|e| panic!("parsing labels {}: {e}", l.display())),
@@ -134,7 +141,7 @@ fn attribution_accuracy_gate() {
     assert!(
         !labels.is_empty(),
         "no labels in {} — see tests/corpus/attribution/LABELING.md",
-        labels_dir.display()
+        corpus.join("labels").display()
     );
 
     let report = evaluate(&store, &labels, MATCH_THRESHOLD).unwrap();
