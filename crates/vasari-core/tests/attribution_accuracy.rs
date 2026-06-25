@@ -38,6 +38,7 @@ fn ingest_session(store: &ObjectStore, source: &str, prompt: &str, files: &[&str
             args: json!({ "file_path": f }),
             result_summary: "ok".to_string(),
             timestamp: ts,
+            rationale: None,
         });
     }
     run_pipeline(events, store).expect("synthetic ingest must succeed");

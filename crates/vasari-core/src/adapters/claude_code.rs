@@ -2,8 +2,10 @@
 ///
 /// Claude Code writes each conversation turn as a newline-delimited JSON record
 /// at `~/.claude/projects/<session>/<timestamp>.jsonl`.  Each record has a
-/// top-level `type` ("human" | "assistant" | "summary" | "system") and a
-/// `message` sub-object in the Claude Messages API format.
+/// top-level `type` ("user" | "assistant" | "summary" | "system"; older exports
+/// used "human" for the user turn, still accepted) and a `message` sub-object in
+/// the Claude Messages API format. User/assistant records also carry a `cwd`,
+/// against which absolute tool `file_path`s are relativized at ingest.
 ///
 /// Filtering rules that match the ingest plan:
 ///   • Skip records whose user message begins with "/" (slash-command invocations).
@@ -71,6 +73,13 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
         collect_tool_results(record, &mut results);
     }
 
+    // The agent's stated reason for the tool calls that follow it. Real sessions
+    // split each `thinking` / `text` / `tool_use` block into its *own* assistant
+    // record, so rationale must be tracked across records (in document order),
+    // not within a single message. Reset at each new user turn so one turn's
+    // rationale never bleeds into the next.
+    let mut rationale: Option<String> = None;
+
     // Pass 2: emit events in document order.
     for record in &records {
         // Extract timestamp from the record (top-level "timestamp" field).
@@ -104,7 +113,7 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
                     });
                 }
             }
-            "human" => {
+            "human" | "user" => {
                 // Human / user turn.  May contain a user text message or tool results.
                 let message = match record.get("message") {
                     Some(m) => m,
@@ -123,6 +132,12 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
                     }
                     // Skip very short boilerplate ("continue", "y", "ok", etc.).
                     if is_boilerplate(&text) {
+                        continue;
+                    }
+                    // Skip auto-generated "user" turns (context-compaction recaps,
+                    // local-command output) — these are not the developer's intent
+                    // and otherwise pollute `vasari why` with multi-paragraph noise.
+                    if is_synthetic_user_text(&text) {
                         continue;
                     }
 
@@ -144,6 +159,9 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
                         found_intent = true;
                     }
 
+                    // A new turn begins — the agent hasn't stated a reason yet.
+                    rationale = None;
+
                     events.push(IngestEvent::UserPrompt {
                         text,
                         timestamp: ts,
@@ -157,13 +175,43 @@ fn parse_jsonl(reader: impl BufRead) -> Result<Vec<IngestEvent>, VasariError> {
                     None => continue,
                 };
 
+                // Claude Code records the agent's working directory per record;
+                // tool `file_path`s are absolute, so relativize against it.
+                let cwd = record.get("cwd").and_then(|v| v.as_str());
+
                 let content = message.get("content");
                 if let Some(content_arr) = content.and_then(|c| c.as_array()) {
+                    // The agent narrates its reason in a `text` (or `thinking`)
+                    // block, then issues the `tool_use` — usually in the *next*
+                    // record. Carry the most recent narration forward as the
+                    // rationale for the calls that follow it.
                     for block in content_arr {
-                        if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
-                            if let Some(ev) = parse_tool_use_block(block, timestamp, &results) {
-                                events.push(ev);
+                        match block.get("type").and_then(|v| v.as_str()) {
+                            Some("text") | Some("thinking") => {
+                                let field = if block.get("text").is_some() {
+                                    "text"
+                                } else {
+                                    "thinking"
+                                };
+                                if let Some(t) = block.get(field).and_then(|v| v.as_str()) {
+                                    let t = t.trim();
+                                    if !t.is_empty() {
+                                        rationale = Some(t.to_string());
+                                    }
+                                }
                             }
+                            Some("tool_use") => {
+                                if let Some(ev) = parse_tool_use_block(
+                                    block,
+                                    timestamp,
+                                    &results,
+                                    cwd,
+                                    rationale.as_deref(),
+                                ) {
+                                    events.push(ev);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -223,10 +271,24 @@ fn extract_text_from_record(record: &Value) -> Option<String> {
     extract_user_text(message.get("content"))
 }
 
+/// Make an absolute tool `file_path` repo-relative by stripping the agent's
+/// working directory. Already-relative paths pass through unchanged.
+fn relativize(path: &str, cwd: Option<&str>) -> String {
+    if let Some(cwd) = cwd {
+        let prefix = format!("{}/", cwd.trim_end_matches('/'));
+        if let Some(rest) = path.strip_prefix(&prefix) {
+            return rest.to_string();
+        }
+    }
+    path.to_string()
+}
+
 fn parse_tool_use_block(
     block: &Value,
     timestamp: DateTime<Utc>,
     results: &HashMap<String, String>,
+    cwd: Option<&str>,
+    rationale: Option<&str>,
 ) -> Option<IngestEvent> {
     let name = block.get("name").and_then(|v| v.as_str())?.to_string();
 
@@ -236,17 +298,21 @@ fn parse_tool_use_block(
         _ => return None,
     }
 
-    let args = block
+    let mut args = block
         .get("input")
         .cloned()
         .unwrap_or(Value::Object(Default::default()));
 
-    // For tools with paths, validate the path doesn't escape the repo
-    // (shared rule — see ingest::is_safe_path).
+    // Tool `file_path`s are absolute in real sessions; relativize against the
+    // record's cwd so they match the repo-relative paths `vasari why` queries.
     if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
-        if !crate::ingest::is_safe_path(path) {
+        let rel = relativize(path, cwd);
+        // For tools with paths, validate the path doesn't escape the repo
+        // (shared rule — see ingest::is_safe_path).
+        if !crate::ingest::is_safe_path(&rel) {
             return None;
         }
+        args["file_path"] = Value::String(rel);
     }
 
     // Correlate this tool_use with its tool_result (keyed by id). For Read this
@@ -264,6 +330,7 @@ fn parse_tool_use_block(
         args,
         result_summary,
         timestamp,
+        rationale: rationale.map(str::to_string),
     })
 }
 
@@ -271,7 +338,8 @@ fn parse_tool_use_block(
 /// Claude Code attaches each tool's result to the *following* human turn as a
 /// `tool_result` block keyed by `tool_use_id`.
 fn collect_tool_results(record: &Value, out: &mut HashMap<String, String>) {
-    if record.get("type").and_then(|v| v.as_str()) != Some("human") {
+    let rt = record.get("type").and_then(|v| v.as_str());
+    if rt != Some("human") && rt != Some("user") {
         return;
     }
     let Some(content) = record
@@ -353,10 +421,124 @@ fn is_boilerplate(text: &str) -> bool {
     BOILERPLATE.contains(&lower.as_str())
 }
 
+/// Auto-generated "user" turns that aren't the developer's intent: context
+/// compaction recaps and local-command output that Claude Code injects as user
+/// messages. Treating these as intents fills `vasari why` with multi-paragraph
+/// summaries instead of the actual request.
+fn is_synthetic_user_text(text: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "This session is being continued from a previous conversation",
+        "Caveat: The messages below were generated by the user while running",
+    ];
+    let trimmed = text.trim_start();
+    PREFIXES.iter().any(|p| trimmed.starts_with(p))
+        // Local slash-command output is wrapped in these tags.
+        || trimmed.starts_with("<command-name>")
+        || trimmed.starts_with("<local-command-stdout>")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn relativize_strips_cwd_prefix() {
+        assert_eq!(
+            relativize("/Users/dev/repo/src/auth.rs", Some("/Users/dev/repo")),
+            "src/auth.rs"
+        );
+        // Trailing slash on cwd is tolerated.
+        assert_eq!(
+            relativize("/Users/dev/repo/src/auth.rs", Some("/Users/dev/repo/")),
+            "src/auth.rs"
+        );
+        // Already-relative paths pass through.
+        assert_eq!(
+            relativize("src/auth.rs", Some("/Users/dev/repo")),
+            "src/auth.rs"
+        );
+        // Path outside cwd is left untouched (is_safe_path rejects it later).
+        assert_eq!(
+            relativize("/etc/passwd", Some("/Users/dev/repo")),
+            "/etc/passwd"
+        );
+        // No cwd → unchanged.
+        assert_eq!(relativize("src/auth.rs", None), "src/auth.rs");
+    }
+
+    #[test]
+    fn parses_user_type_records_with_absolute_paths() {
+        // Real Claude Code sessions use `type:"user"` (not `"human"`) and record
+        // absolute file_paths under a per-record `cwd`. Both must be handled.
+        let jsonl = r#"{"type":"user","timestamp":"2026-01-01T00:00:00Z","uuid":"u1","cwd":"/Users/dev/repo","message":{"role":"user","content":"Add JWT verification"}}
+{"type":"assistant","timestamp":"2026-01-01T00:00:01Z","cwd":"/Users/dev/repo","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"/Users/dev/repo/src/auth.rs","old_string":"a","new_string":"b"}}]}}"#;
+        let events = parse_jsonl(Cursor::new(jsonl)).unwrap();
+        // The user prompt becomes an intent-bearing UserPrompt.
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, IngestEvent::UserPrompt { text, .. } if text.contains("JWT"))));
+        // The Edit survives and its path is repo-relative.
+        let path = events.iter().find_map(|e| match e {
+            IngestEvent::ToolCall { name, args, .. } if name == "Edit" => args
+                .get("file_path")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            _ => None,
+        });
+        assert_eq!(path.as_deref(), Some("src/auth.rs"));
+    }
+
+    #[test]
+    fn skips_synthetic_user_turns() {
+        // Context-compaction recaps and command-output caveats are injected as
+        // `user` records but are not the developer's intent.
+        assert!(is_synthetic_user_text(
+            "This session is being continued from a previous conversation that ran out of context.\n\nSummary:\n1. ..."
+        ));
+        assert!(is_synthetic_user_text(
+            "Caveat: The messages below were generated by the user while running local commands. DO NOT respond..."
+        ));
+        assert!(is_synthetic_user_text(
+            "<command-name>/clear</command-name>"
+        ));
+        // A genuine request is not synthetic.
+        assert!(!is_synthetic_user_text(
+            "Add JWT verification to the auth module"
+        ));
+    }
+
+    #[test]
+    fn compaction_summary_does_not_become_an_intent() {
+        let jsonl = r#"{"type":"user","timestamp":"2026-01-01T00:00:00Z","uuid":"u1","cwd":"/r","message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context.\n\nSummary: lots of recap text."}}
+{"type":"user","timestamp":"2026-01-01T00:01:00Z","uuid":"u2","cwd":"/r","message":{"role":"user","content":"Add rate limiting to the API"}}"#;
+        let events = parse_jsonl(Cursor::new(jsonl)).unwrap();
+        let prompts: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                IngestEvent::UserPrompt { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(prompts, vec!["Add rate limiting to the API"]);
+    }
+
+    #[test]
+    fn tool_use_captures_preceding_assistant_text_as_rationale() {
+        // The text block immediately before a tool_use is the agent's stated
+        // reason for the call.
+        let jsonl = r#"{"type":"user","timestamp":"2026-01-01T00:00:00Z","uuid":"u1","cwd":"/r","message":{"role":"user","content":"fix auth"}}
+{"type":"assistant","timestamp":"2026-01-01T00:00:01Z","cwd":"/r","message":{"role":"assistant","content":[{"type":"text","text":"Now I'll add the JWT signature check."},{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"/r/src/auth.rs","old_string":"a","new_string":"b"}}]}}"#;
+        let events = parse_jsonl(Cursor::new(jsonl)).unwrap();
+        let rationale = events.iter().find_map(|e| match e {
+            IngestEvent::ToolCall { rationale, .. } => Some(rationale.clone()),
+            _ => None,
+        });
+        assert_eq!(
+            rationale,
+            Some(Some("Now I'll add the JWT signature check.".to_string()))
+        );
+    }
 
     #[test]
     fn tool_result_is_correlated_into_tool_call() {

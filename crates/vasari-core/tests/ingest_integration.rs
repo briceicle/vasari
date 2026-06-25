@@ -125,6 +125,74 @@ fn ingest_is_idempotent() {
     );
 }
 
+/// Regression test for ingesting *real* Claude Code sessions.
+///
+/// Real sessions differ from the hand-written fixtures in two ways that each
+/// silently produced zero attributions before the fix:
+///   1. records carry `type:"user"` (not `"human"`), so every user turn — and
+///      therefore the session Intent — was skipped;
+///   2. tool `file_path`s are absolute (e.g. `/Users/dev/myrepo/src/auth.rs`),
+///      so `is_safe_path` rejected them and dropped every Edit/Write, and even
+///      if stored they would not match the repo-relative path `vasari why` queries.
+///
+/// This fixture mirrors the real on-disk schema; the assertions fail loudly if
+/// either regression returns.
+#[test]
+fn ingests_real_session_user_type_and_absolute_paths() {
+    let (store, _dir) = open_store();
+
+    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/claude_code/real-session-shape.jsonl");
+
+    let events = ClaudeCodeAdapter
+        .parse(IngestSource::File(fixture))
+        .expect("fixture should parse without error");
+
+    let summary = run_pipeline(events, &store).expect("pipeline should complete");
+
+    // Bug 1: `type:"user"` records must form an Intent.
+    assert!(
+        summary.intents_created >= 1,
+        "a `user`-type prompt must produce an Intent (got {})",
+        summary.intents_created
+    );
+    // Bug 2: absolute file_paths must not be dropped — Edit + Write attribute.
+    assert!(
+        summary.attributions_created >= 1,
+        "absolute file_paths must still produce attributions (got {})",
+        summary.attributions_created
+    );
+
+    // Bug 3: coverage is keyed by the *repo-relative* path the user queries,
+    // not the absolute path recorded in the session.
+    let relative = store
+        .lookup_attributions("src/auth.rs", 1)
+        .expect("lookup should not error");
+    assert!(
+        !relative.is_empty(),
+        "src/auth.rs (relative) should have attribution coverage"
+    );
+    let absolute = store
+        .lookup_attributions("/Users/dev/myrepo/src/auth.rs", 1)
+        .expect("lookup should not error");
+    assert!(
+        absolute.is_empty(),
+        "absolute paths must not leak into the attribution index"
+    );
+
+    // The chain resolves back to the user's stated intent.
+    let chain = vasari_core::resolve::why(&store, "src/auth.rs", 1)
+        .expect("resolve should not error")
+        .expect("src/auth.rs:1 should resolve to a chain");
+    assert!(
+        chain
+            .primary_intent()
+            .is_some_and(|i| i.text.contains("JWT")),
+        "intent should carry the user's goal, got {:?}",
+        chain.primary_intent().map(|i| &i.text)
+    );
+}
+
 /// OTEL golden-file test: verify that the simple-gen-ai fixture produces
 /// at least one Intent with a non-empty text.
 #[test]
