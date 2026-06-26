@@ -7,6 +7,14 @@ Version scheme: `MAJOR.MINOR.PATCH.BUILD` (gstack convention).
 
 ---
 
+## [0.2.3.0] — 2026-06-26
+
+### Changed
+
+- Docs only: dropped the "Giorgio Vasari" namesake framing from the README and the
+  CLI `--help` text. crates.io versions are immutable, so this refreshes the crate
+  page (the 0.2.2 page still showed the old framing).
+
 ## [0.2.2.0] — 2026-06-26
 
 First crates.io release (`cargo install vasari`). Real Claude Code sessions now
