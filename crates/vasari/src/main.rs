@@ -9,7 +9,7 @@ use vasari_core::{
 #[derive(Parser)]
 #[command(
     name = "vasari",
-    about = "Intent attribution for autonomous coding agents.\n\nLike its namesake — Giorgio Vasari, who invented art attribution by\nasking who painted this, and why — Vasari looks at a line of code\nand answers the same question.",
+    about = "Intent attribution for autonomous coding agents.\n\nVasari looks at a line of code and answers: who wrote this, and why?",
     version
 )]
 struct Cli {
