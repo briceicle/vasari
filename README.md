@@ -6,6 +6,8 @@ Like its namesake — Giorgio Vasari, the Florentine biographer who invented art
 attribution by looking at brushwork and asking *who painted this, and why?* —
 Vasari looks at a line of code and answers the same question:
 
+![vasari why — resolving a line of code to the intent and the agent's stated reasoning that produced it](docs/media/vasari-why.gif)
+
 ```
 $ vasari ingest claude-code ~/.claude/projects/<project>/<session>.jsonl
 $ vasari why crates/vasari-core/src/adapters/otel.rs:8
