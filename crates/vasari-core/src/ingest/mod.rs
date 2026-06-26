@@ -200,11 +200,14 @@ pub fn run_pipeline(
             turn.tools.iter().enumerate()
         {
             // A Read result is the file's content as the agent saw it — record it
-            // so a later Edit can be located against it.
+            // so a later Edit can be located against it. Claude Code returns Read
+            // content in `cat -n` form (line-number + tab prefix per line); strip
+            // it so `old_string` (raw source) can be located by substring match.
             if name == "Read" {
                 if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
                     if !result_summary.is_empty() {
-                        file_contents.insert(path.to_string(), result_summary.clone());
+                        file_contents
+                            .insert(path.to_string(), strip_read_line_numbers(result_summary));
                     }
                 }
             }
@@ -468,6 +471,35 @@ fn edit_attribution(
     )
 }
 
+/// Strip Claude Code's `cat -n` line-number prefix (`<optional spaces><digits>\t`)
+/// from each line of a Read result, leaving the raw source so an Edit's
+/// `old_string` can be located by substring match. Lines without the prefix
+/// (e.g. wrapped notes) pass through unchanged, and the line count is preserved
+/// so computed ranges stay accurate.
+fn strip_read_line_numbers(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for (i, line) in s.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(strip_one_line_number(line));
+    }
+    out
+}
+
+/// Strip a single leading `<spaces><digits>\t` prefix, or return the line as-is.
+fn strip_one_line_number(line: &str) -> &str {
+    let trimmed = line.trim_start_matches(' ');
+    let digits = trimmed.trim_start_matches(|c: char| c.is_ascii_digit());
+    // Require at least one digit consumed and a tab immediately after.
+    if digits.len() < trimmed.len() {
+        if let Some(rest) = digits.strip_prefix('\t') {
+            return rest;
+        }
+    }
+    line
+}
+
 /// Number of lines a string spans (at least 1; a trailing newline doesn't add one).
 fn line_count(s: &str) -> u32 {
     if s.is_empty() {
@@ -606,6 +638,61 @@ mod tests {
                 assert_eq!(end, 3, "single-line replacement");
             }
             other => panic!("expected LineRange, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn strip_read_line_numbers_removes_cat_n_prefix() {
+        // Claude Code Read format: `<spaces><n>\t<content>`.
+        let read = "     1\tfn a() {}\n     2\tfn b() {}\n    10\tfn j() {}";
+        assert_eq!(
+            strip_read_line_numbers(read),
+            "fn a() {}\nfn b() {}\nfn j() {}"
+        );
+        // Unpadded form (as seen in real sessions for line 1).
+        assert_eq!(strip_read_line_numbers("1\thello"), "hello");
+        // Lines without the prefix pass through; line count is preserved.
+        let mixed = "1\tcode\nplain note\n3\tmore";
+        assert_eq!(strip_read_line_numbers(mixed), "code\nplain note\nmore");
+        // A tab inside content (no leading number) is untouched.
+        assert_eq!(
+            strip_read_line_numbers("no number\there"),
+            "no number\there"
+        );
+    }
+
+    #[test]
+    fn edit_locates_against_cat_n_read_result() {
+        // End-to-end: a Read result in `cat -n` form must still let an Edit's
+        // raw `old_string` resolve to an exact line range (not whole-file).
+        let (store, _dir) = make_store();
+        let read = "     1\tfn a() {}\n     2\tfn b() {}\n     3\tfn c() {}\n";
+        let events = vec![
+            IngestEvent::UserPrompt {
+                text: "rewrite c".into(),
+                timestamp: Utc::now(),
+            },
+            IngestEvent::ToolCall {
+                name: "Read".into(),
+                args: json!({ "file_path": "src/x.rs" }),
+                result_summary: read.into(),
+                timestamp: Utc::now(),
+                rationale: None,
+            },
+            IngestEvent::ToolCall {
+                name: "Edit".into(),
+                args: json!({ "file_path": "src/x.rs", "old_string": "fn c() {}", "new_string": "fn c() { c2(); }" }),
+                result_summary: "ok".into(),
+                timestamp: Utc::now(),
+                rationale: None,
+            },
+        ];
+        run_pipeline(events, &store).unwrap();
+        match attr_target_for(&store, "src/x.rs") {
+            AttributionTarget::LineRange { start, end, .. } => {
+                assert_eq!((start, end), (3, 3), "fn c() is on line 3");
+            }
+            other => panic!("expected exact LineRange, got {other:?}"),
         }
     }
 

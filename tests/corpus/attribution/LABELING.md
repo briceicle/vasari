@@ -53,6 +53,31 @@ A line that no intent should explain (e.g. a pre-existing file the agent never e
 {"file":"src/legacy.rs","line":3,"expected_intent":[],"confidence_threshold":0.5,"notes":"untouched by the session"}
 ```
 
+## Dogfooding on your own real sessions (local, never committed)
+
+The committed corpus is synthetic (no privacy/IP blast radius) but mirrors the real
+on-disk schema. To score the gate against **real** Claude Code sessions, drop them in
+the gitignored local dirs — the gate merges them with the committed corpus when present:
+
+```
+mkdir -p tests/corpus/attribution/{sessions-local,labels-local}
+
+# 1. Scrub a real session (best-effort redaction; pair with gitleaks/trufflehog):
+bash tests/corpus/attribution/run.sh scrub ~/.claude/projects/<proj>/<session>.jsonl \
+  > tests/corpus/attribution/sessions-local/mysess.jsonl
+
+# 2. Discover + author labels for it (see "Discovery" above), writing to:
+#    tests/corpus/attribution/labels-local/mysess.jsonl
+
+# 3. Run the gate — it now scores real + synthetic together:
+bash tests/corpus/attribution/run.sh
+```
+
+`sessions-local/` and `labels-local/` are in `.gitignore` — they never reach the repo,
+so real prompts/paths/code stay on your machine. Label only the lines an edit actually
+touched: an exact-range edit won't cover line 1 of a file whose change was lower down,
+and the gate correctly scores an uncovered labeled line as a miss.
+
 ## Pilot scale-up rule (numeric, not "plausible")
 
 Before labeling all 100 lines, label 10 and run `bash tests/corpus/attribution/run.sh`.
