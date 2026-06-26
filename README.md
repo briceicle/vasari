@@ -8,21 +8,12 @@ Vasari looks at a line of code and answers the same question:
 
 ![vasari why — resolving a line of code to the intent and the agent's stated reasoning that produced it](docs/media/vasari-why.gif)
 
-```
-$ vasari ingest claude-code ~/.claude/projects/<project>/<session>.jsonl
-$ vasari why crates/vasari-core/src/adapters/otel.rs:8
-Do a) and b) in parallel
-  from  claude-code:cca4eab7… · 2026-06-25 01:04 UTC
-  via   Edit · step 44/74 · Now update otel.rs (the other `ToolCall` construction site) to add `rationale: None`:
-  conf  1.00
-```
-
-That is real output, attributing a line from Vasari's own development. The
-answer reads: the line exists because of the prompt *"Do a) and b) in parallel"*,
-written by the Edit at plan step 44/74, whose stated reason was *"update otel.rs
-… to add `rationale: None`"*. `conf 1.00` means the exact line range was located
-against the file the agent had Read; it drops to `0.70` when an edit can't be
-located and Vasari falls back to whole-file attribution. Attribution is
+That is real output, attributing a line from Vasari's own development. It reads:
+the line exists because of the prompt *"Do a) and b) in parallel"* (`from`),
+written by the Edit at plan step 44/74 whose stated reason was *"update otel.rs …
+to add `rationale: None`"* (`via`). `conf 1.00` means the exact line range was
+located against the file the agent had Read; it drops to `0.70` when an edit
+can't be located and Vasari falls back to whole-file attribution. Attribution is
 file→intent today — see [Status](#status).
 
 ## What it is
