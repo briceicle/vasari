@@ -35,16 +35,20 @@ vasari diff <plan-a> <plan-b>    # where did this agent's plan diverge from spec
 
 ## Install
 
-Build from source — a Rust toolchain is the only requirement:
+```
+cargo install vasari
+```
+
+Or build from source (no crates.io needed):
 
 ```
 git clone https://github.com/briceicle/vasari
 cd vasari
-cargo install --path crates/vasari    # installs the `vasari` binary
+cargo install --path crates/vasari
 ```
 
-Pre-built binaries (crates.io) and a `pip install vasari` wheel are planned, not
-yet shipped — see the "Release workflow" and "Python wheel" items in `TODOS.md`.
+A `pip install vasari` wheel is planned but not yet shipped — see the
+"Python wheel" item in `TODOS.md`.
 
 ## Ingest
 
