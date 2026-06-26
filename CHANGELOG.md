@@ -7,7 +7,10 @@ Version scheme: `MAJOR.MINOR.PATCH.BUILD` (gstack convention).
 
 ---
 
-## [Unreleased]
+## [0.2.2.0] — 2026-06-26
+
+First crates.io release (`cargo install vasari`). Real Claude Code sessions now
+ingest end-to-end with line-range precision; see below.
 
 ### Changed
 

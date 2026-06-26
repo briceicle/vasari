@@ -17,7 +17,7 @@ path = "src/main.rs"
 [dependencies]
 # `version` is required for `cargo publish` (path is stripped on publish); keep
 # it in lockstep with the workspace version on every bump.
-vasari-core = { path = "../vasari-core", version = "0.2.1" }
+vasari-core = { path = "../vasari-core", version = "0.2.2" }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }
