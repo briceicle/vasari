@@ -2,9 +2,7 @@
 
 **Intent attribution for autonomous coding agents.**
 
-Like its namesake — Giorgio Vasari, the Florentine biographer who invented art
-attribution by looking at brushwork and asking *who painted this, and why?* —
-Vasari looks at a line of code and answers the same question:
+Vasari looks at a line of code and answers: *who wrote this, and why?*
 
 ![vasari why — resolving a line of code to the intent and the agent's stated reasoning that produced it](https://raw.githubusercontent.com/briceicle/vasari/main/docs/media/vasari-why.gif)
 
