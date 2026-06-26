@@ -3,6 +3,9 @@
 *.orig
 .DS_Store
 
+# Agent tooling captured by the workspace — never part of this project.
+.claude/
+
 # Opt-in local accuracy corpus: scrubbed real sessions + labels for dogfooding
 # the gate on real data. Never committed (privacy/IP); see LABELING.md.
 /tests/corpus/attribution/sessions-local/
