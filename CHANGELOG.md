@@ -24,6 +24,15 @@ Version scheme: `MAJOR.MINOR.PATCH.BUILD` (gstack convention).
   compaction recaps ("This session is being continued…") and local-command
   output caveats are filtered, so they no longer surface as multi-paragraph
   "why" answers.
+- **Non-intent user messages no longer become headline intents.** Dogfooding
+  `vasari why` on 10 real sessions surfaced three more leaks now filtered:
+  multiple-choice answers to the agent's questions ("A", "all B" — real input,
+  but a continuation of the prior request, so their tool calls roll up to it
+  rather than opening an intent named "A"); skill-invocation preambles
+  ("Base directory for this skill: …"); and injected wrapper tags
+  (`<system_instruction>`, `<command-message>`/`<command-name>`,
+  `<system-reminder>`). Across the 10 sessions this dropped leaked intents to
+  zero (38 real intents remain).
 - **Accuracy gate now exercises the real on-disk schema.** The scripted corpus
   (`generate.py`) emitted `"human"`-typed records with relative paths and plain
   Read results — so the gate passed at "100%" even while real-session ingest was
