@@ -1,10 +1,15 @@
 [package]
 name = "vasari-core"
-description = "Core graph library for Vasari intent attribution"
+description = "Content-addressed intent-graph library behind Vasari — intent attribution for autonomous coding agents."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage = "https://github.com/briceicle/vasari"
+documentation = "https://docs.rs/vasari-core"
+readme = "../../README.md"
+keywords = ["agents", "llm", "attribution", "provenance", "observability"]
+categories = ["development-tools", "development-tools::debugging"]
 
 [dependencies]
 serde = { workspace = true }

@@ -1,17 +1,23 @@
 [package]
 name = "vasari"
-description = "Intent attribution CLI for autonomous coding agents"
+description = "Intent attribution for autonomous coding agents — `git blame` for what your agent was thinking."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage = "https://github.com/briceicle/vasari"
+readme = "../../README.md"
+keywords = ["agents", "llm", "attribution", "provenance", "observability"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "vasari"
 path = "src/main.rs"
 
 [dependencies]
-vasari-core = { path = "../vasari-core" }
+# `version` is required for `cargo publish` (path is stripped on publish); keep
+# it in lockstep with the workspace version on every bump.
+vasari-core = { path = "../vasari-core", version = "0.2.1" }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }
