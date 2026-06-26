@@ -6,7 +6,7 @@ Like its namesake — Giorgio Vasari, the Florentine biographer who invented art
 attribution by looking at brushwork and asking *who painted this, and why?* —
 Vasari looks at a line of code and answers the same question:
 
-![vasari why — resolving a line of code to the intent and the agent's stated reasoning that produced it](docs/media/vasari-why.gif)
+![vasari why — resolving a line of code to the intent and the agent's stated reasoning that produced it](https://raw.githubusercontent.com/briceicle/vasari/main/docs/media/vasari-why.gif)
 
 That is real output, attributing a line from Vasari's own development. It reads:
 the line exists because of the prompt *"Do a) and b) in parallel"* (`from`),
