@@ -32,6 +32,12 @@ enum Commands {
         /// Output as newline-delimited JSON (one object per attribution chain)
         #[arg(long)]
         json: bool,
+        /// Maximum number of attribution chains to print (0 = show all).
+        #[arg(long, default_value_t = 3)]
+        limit: usize,
+        /// Hide chains below this confidence (e.g. 1.0 = exact line-range matches only).
+        #[arg(long, default_value_t = 0.0)]
+        min_confidence: f32,
     },
     /// Show where two plans diverged.
     ///
@@ -94,7 +100,12 @@ fn main() -> Result<()> {
         .with_context(|| format!("opening .vasari store at {}", repo_root.display()))?;
 
     match cli.command {
-        Commands::Why { target, json } => cmd_why(&store, &target, json),
+        Commands::Why {
+            target,
+            json,
+            limit,
+            min_confidence,
+        } => cmd_why(&store, &target, json, limit, min_confidence),
         Commands::Diff { plan_a, plan_b } => cmd_diff(&store, &plan_a, &plan_b),
         Commands::Ingest(ingest_cmd) => cmd_ingest(&store, ingest_cmd),
         Commands::Constrain {
@@ -110,7 +121,30 @@ fn main() -> Result<()> {
     }
 }
 
-fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
+/// Given the total number of attribution chains and the `--limit` value
+/// (`0` means "show all"), return how many to print and how many are hidden.
+fn limit_chains(total: usize, limit: usize) -> (usize, usize) {
+    if limit == 0 || total <= limit {
+        (total, 0)
+    } else {
+        (limit, total - limit)
+    }
+}
+
+/// Whether a chain's confidence clears the `--min-confidence` threshold.
+/// A NaN confidence never passes (and so is hidden) unless the threshold is
+/// also NaN, which the CLI never produces.
+fn confidence_passes(confidence: f32, min_confidence: f32) -> bool {
+    confidence >= min_confidence
+}
+
+fn cmd_why(
+    store: &ObjectStore,
+    target: &str,
+    json: bool,
+    limit: usize,
+    min_confidence: f32,
+) -> Result<()> {
     let (path, line) = parse_target(target)?;
 
     let chains = why_all(store, &path, line).with_context(|| format!("resolving {path}:{line}"))?;
@@ -129,8 +163,27 @@ fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
         return Ok(());
     }
 
+    // Drop chains below the confidence threshold before counting/printing.
+    let best = chains
+        .iter()
+        .map(|c| c.confidence())
+        .fold(f32::MIN, f32::max);
+    let chains: Vec<_> = chains
+        .into_iter()
+        .filter(|c| confidence_passes(c.confidence(), min_confidence))
+        .collect();
+
+    if chains.is_empty() {
+        println!(
+            "No attribution chains at or above --min-confidence {min_confidence:.2} (best available: {best:.2})."
+        );
+        return Ok(());
+    }
+
+    let (shown, hidden) = limit_chains(chains.len(), limit);
+
     if json {
-        for chain in &chains {
+        for chain in chains.iter().take(shown) {
             let obj = serde_json::json!({
                 "target": format!("{path}:{line}"),
                 "intent_text": chain.primary_intent().map(|i| &i.text),
@@ -153,7 +206,7 @@ fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
         println!("{path}:{line} — {} attributions\n", chains.len());
     }
 
-    for (i, chain) in chains.iter().enumerate() {
+    for (i, chain) in chains.iter().take(shown).enumerate() {
         if chains.len() > 1 {
             println!("[{}]", i + 1);
         }
@@ -197,6 +250,10 @@ fn cmd_why(store: &ObjectStore, target: &str, json: bool) -> Result<()> {
         if chains.len() > 1 {
             println!();
         }
+    }
+
+    if hidden > 0 {
+        println!("… and {hidden} more (use --limit 0 to show all)");
     }
 
     Ok(())
@@ -472,4 +529,37 @@ fn parse_target(target: &str) -> Result<(String, u32)> {
         anyhow::bail!("line number must be a positive integer (1-indexed), got '0'");
     }
     Ok((path.to_string(), line))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limit_chains_truncates_and_reports_remainder() {
+        // More chains than the limit: show `limit`, hide the rest.
+        assert_eq!(limit_chains(10, 3), (3, 7));
+        // Exactly at the limit: show all, nothing hidden.
+        assert_eq!(limit_chains(3, 3), (3, 0));
+        // Fewer chains than the limit: show all, nothing hidden.
+        assert_eq!(limit_chains(2, 3), (2, 0));
+        // limit == 0 means "show all", regardless of count.
+        assert_eq!(limit_chains(10, 0), (10, 0));
+        // No chains at all.
+        assert_eq!(limit_chains(0, 3), (0, 0));
+    }
+
+    #[test]
+    fn confidence_passes_respects_threshold() {
+        // Default threshold (0.0) admits everything real.
+        assert!(confidence_passes(1.0, 0.0));
+        assert!(confidence_passes(0.0, 0.0));
+        // At-threshold passes; just-below is hidden.
+        assert!(confidence_passes(1.0, 1.0));
+        assert!(!confidence_passes(0.9, 1.0));
+        // Above threshold passes.
+        assert!(confidence_passes(0.95, 0.5));
+        // NaN confidence never clears a real threshold.
+        assert!(!confidence_passes(f32::NAN, 0.0));
+    }
 }
