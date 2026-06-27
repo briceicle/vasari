@@ -4,15 +4,17 @@
 
 Vasari looks at a line of code and answers: *who wrote this, and why?*
 
-![vasari why — resolving a line of code to the intent and the agent's stated reasoning that produced it](https://raw.githubusercontent.com/briceicle/vasari/main/docs/media/vasari-why.gif)
+![vasari why — two lines of one file resolving to two different intents from the same session, each with the agent's stated reasoning](https://raw.githubusercontent.com/briceicle/vasari/main/docs/media/vasari-why.gif)
 
-That is real output, attributing a line from Vasari's own development. It reads:
-the line exists because of the prompt *"Do a) and b) in parallel"* (`from`),
-written by the Edit at plan step 44/74 whose stated reason was *"update otel.rs …
-to add `rationale: None`"* (`via`). `conf 1.00` means the exact line range was
-located against the file the agent had Read; it drops to `0.70` when an edit
-can't be located and Vasari falls back to whole-file attribution. Attribution is
-file→intent today — see [Status](#status).
+That is real output from Vasari's own development. Two lines of the *same* file
+resolve to two *different* intents from one session: `main.rs:126` exists because
+of the request to *"add a `--limit` flag"*, while `main.rs:40` came from a later
+request to *"add a `--min-confidence` flag"* — each with the agent's own stated
+reason (`via`). Disentangling which intent produced which line, within a single
+session, is the point: `git blame` over cognition. `conf 1.00` means the exact
+line range was located against the file the agent had Read; it drops to `0.70`
+when an edit can't be located and Vasari falls back to whole-file attribution.
+Attribution is file→intent today — see [Status](#status).
 
 ## What it is
 
