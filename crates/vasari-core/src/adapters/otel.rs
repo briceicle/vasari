@@ -265,10 +265,9 @@ fn parse_unix_nano(val: &Value) -> Option<DateTime<Utc>> {
         s.parse().ok()?
     } else if let Some(n) = val.as_i64() {
         n
-    } else if let Some(n) = val.as_u64() {
-        n as i64
     } else {
-        return None;
+        let n = val.as_u64()?;
+        n as i64
     };
     let secs = nanos / 1_000_000_000;
     let nsecs = (nanos % 1_000_000_000) as u32;
