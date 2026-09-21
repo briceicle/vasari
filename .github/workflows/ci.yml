@@ -1,4 +1,4 @@
-name: Needs and Outputs
+name: build-and-test
 
 on:
   push:
