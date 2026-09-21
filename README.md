@@ -22,7 +22,7 @@ Vasari is a **content-addressed intent graph**: Git for agent cognition. Intent
 objects have content hashes, parents, and merges; an amended plan is `commit
 --amend`; an agent handoff is a merge; `vasari why` is `git blame` over cognition.
 
-OTEL/MCP are adapters. The primitive, not the dashboard, is the product.
+OTEL/MCP are adapters. The primitive, not the dashboard, is the product
 
 ## Two hero verbs
 
