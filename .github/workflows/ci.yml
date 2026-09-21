@@ -242,37 +242,4 @@ jobs:
             exit 1
           fi
 
-  # Reusable-workflow call. The translator inlines this at translation time: the
-  # `call-build` job does not appear in the continued pipeline at all, and the
-  # called workflow's two jobs run in its place as `call-build-compile` and
-  # `call-build-package`. `call-build-compile` inherits this call's `needs:
-  # prepare`, and `report` below waits on `call-build-package` -- the callee's
-  # terminal job -- so the call behaves as one barrier the way GitHub treats it.
-  #
-  # The callee is at .github/workflows/reusable-workflow-callee.yml because a
-  # local `uses:` is written relative to the repository root. It is inert there:
-  # its only trigger is `workflow_call`, so GitHub never runs it on its own.
-  #
-  # Reusable workflows work only on the CLI translate path, which can read the
-  # callee from the checkout. This scenario is therefore the end-to-end coverage
-  # for the feature; the HTTP endpoint refuses such a call outright.
-  call-build:
-    needs: prepare
-    uses: ./.github/workflows/reusable-workflow-callee.yml
-    with:
-      target: release
-
-  report:
-    runs-on: ubuntu-latest
-    needs: [build, test, call-build]
-    steps:
-      - name: Verify all jobs passed
-        run: |
-          echo "build result: ${{ needs.build.result }}"
-          echo "test result: ${{ needs.test.result }}"
-          if [ "${{ needs.build.result }}" = "success" ] && [ "${{ needs.test.result }}" = "success" ]; then
-            echo "All jobs passed — workflow complete"
-          else
-            echo "ERROR: One or more jobs failed"
-            exit 1
-          fi
+  
