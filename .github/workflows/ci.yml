@@ -1,53 +1,278 @@
-name: CI
+name: Needs and Outputs
 
 on:
   push:
-    branches: ["**"]
-  pull_request:
-
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+      build-date: ${{ steps.set-version.outputs.build-date }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Set version output
+        id: set-version
+        run: |
+          VERSION="1.2.3"
+          BUILD_DATE=$(date -u +%Y-%m-%d)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build-date=$BUILD_DATE" >> "$GITHUB_OUTPUT"
+          echo "Prepared: version=$VERSION, build-date=$BUILD_DATE"
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+  build:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - name: Verify output masking
+        run: |
+          TOKEN="not-a-real-secret-abc123"
+          echo "::add-mask::$TOKEN"
+          echo "The token value is: $TOKEN"
+          echo "If masking works, the line above shows *** instead of the value"
 
-      - name: Cache cargo registry and build
-        uses: actions/cache@v4
+      - name: Write version manifest
+        run: |
+          printf 'version: "%s"\ndate: "%s"\n' \
+            "${{ needs.prepare.outputs.version }}" \
+            "${{ needs.prepare.outputs.build-date }}" \
+            > "$GITHUB_WORKSPACE/manifest.yml"
+
+      - name: Extract version with yq
+        id: validate-yq
+        uses: mikefarah/yq@v4.44.3
         with:
+          cmd: yq '.version' "$GITHUB_WORKSPACE/manifest.yml"
+
+      - name: Show yq result
+        run: |
+          echo "yq result: ${{ steps.validate-yq.outputs.result }}"
+
+      - name: Use version from prepare
+        run: |
+          echo "Building version: ${{ needs.prepare.outputs.version }}"
+          echo "Build date: ${{ needs.prepare.outputs.build-date }}"
+          if [ -z "${{ needs.prepare.outputs.version }}" ]; then
+            echo "ERROR: version output is empty"
+            exit 1
+          fi
+          echo "build complete for v${{ needs.prepare.outputs.version }}"
+
+  test:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - name: Use version from prepare
+        run: |
+          echo "Testing version: ${{ needs.prepare.outputs.version }}"
+          if [ -z "${{ needs.prepare.outputs.version }}" ]; then
+            echo "ERROR: version output is empty"
+            exit 1
+          fi
+          echo "tests passed for v${{ needs.prepare.outputs.version }}"
+
+  log-behavior:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Output masking
+        run: |
+          SECRET="xK9$mQ2!rP7"
+          echo "::add-mask::$SECRET"
+          echo "plain line before masking (already registered above)"
+          echo "secret inline: $SECRET"
+          echo "secret in text: the value is $SECRET end"
+
+      - name: Masking is silent
+        run: |
+          echo "The add-mask command above must not appear in output"
+          echo "No ::add-mask:: line should be visible in the log"
+
+      - name: Annotations
+        run: |
+          echo "::error file=src/app.go,line=10::null pointer dereference"
+          echo "::warning file=src/util.go,line=5::deprecated function call"
+          echo "::notice::this is a notice"
+          echo "regular line after annotations"
+
+      - name: Debug filtered by default
+        run: |
+          echo "::debug::this debug line must not appear unless ACTIONS_STEP_DEBUG=1"
+          echo "regular line — must always appear"
+
+      - name: Debug shown when enabled
+        env:
+          ACTIONS_STEP_DEBUG: "1"
+        run: |
+          echo "::debug::debug enabled — this must appear with ##[debug] prefix"
+          echo "regular line alongside debug"
+
+      - name: Group markers consumed
+        run: |
+          echo "::group::Inner work"
+          echo "inside the group"
+          echo "::endgroup::"
+          echo "after the group"
+
+  test-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Show Python version
+        run: |
+          echo "Running tests with Python ${{ matrix.python-version }}"
+
+  # Container job: all run: steps execute inside the declared image via docker
+  # exec. alpine:3 is musl-based and clearly distinct from the Ubuntu runner
+  # host, so a step reading /etc/os-release proves docker exec is in use.
+  container-job:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:3
+      env:
+        CONTAINER_VAR: hello-from-container
+    steps:
+      - name: Steps execute inside the container image
+        run: |
+          ID=$(. /etc/os-release && echo "$ID")
+          echo "os: $ID"
+          if [ "$ID" != "alpine" ]; then
+            echo "ERROR: expected alpine, got $ID"
+            exit 1
+          fi
+          echo "CONTAINER_OS_OK=ok"
+
+      - name: Container env vars are injected
+        run: |
+          echo "CONTAINER_VAR=$CONTAINER_VAR"
+          if [ "$CONTAINER_VAR" != "hello-from-container" ]; then
+            echo "ERROR: expected hello-from-container, got $CONTAINER_VAR"
+            exit 1
+          fi
+          echo "CONTAINER_ENV_OK=ok"
+
+  # Fail-fast: a failing line in the middle of a multi-line run: step must fail
+  # the step. Both steps are advisory so the pipeline stays green, and the
+  # following step asserts the outcome the runner recorded.
+  fail-fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Failing line aborts the script
+        id: midscript
+        continue-on-error: true
+        run: |
+          echo "first line ran"
+          false
+          echo "ERROR: the script continued past a failing line"
+
+      - name: Assert the mid-script failure was caught
+        run: |
+          echo "outcome: ${{ steps.midscript.outcome }}"
+          echo "conclusion: ${{ steps.midscript.conclusion }}"
+          if [ "${{ steps.midscript.outcome }}" != "failure" ]; then
+            echo "ERROR: a failing line mid-script did not fail the step"
+            exit 1
+          fi
+          if [ "${{ steps.midscript.conclusion }}" != "success" ]; then
+            echo "ERROR: continue-on-error did not soften the conclusion"
+            exit 1
+          fi
+
+      # continue-on-error as an expression, not the literal "true".
+      - name: Failing pipe fails the step
+        id: pipefail
+        continue-on-error: ${{ github.ref_type == 'branch' }}
+        run: |
+          false | cat
+          echo "ERROR: a failing command in a pipeline did not fail the step"
+
+      - name: Assert pipefail was caught
+        run: |
+          echo "outcome: ${{ steps.pipefail.outcome }}"
+          if [ "${{ steps.pipefail.outcome }}" != "failure" ]; then
+            echo "ERROR: -o pipefail is not in effect"
+            exit 1
+          fi
+          if [ "${{ steps.pipefail.conclusion }}" != "success" ]; then
+            echo "ERROR: continue-on-error expression did not evaluate to true"
+            exit 1
+          fi
+
+      - name: Write nested log files
+        run: |
+          mkdir -p logs/deep/deeper
+          echo "top" > logs/a.log
+          echo "deep" > logs/deep/b.log
+          echo "deeper" > logs/deep/deeper/c.log
+          echo "not a log" > logs/notes.txt
+
+      # ** must reach every depth, and the exclusion must too.
+      - name: Upload nested logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: nested-logs
           path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+            logs/**/*.log
+            !logs/**/notes.txt
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+  # A job-level if: that is false must skip the job. The runner cannot decide
+  # this while it generates the CircleCI config, so the job starts, evaluates
+  # the expression, runs no step, and reports "skipped".
+  never-runs:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/this-branch-does-not-exist'
+    steps:
+      - name: Must not run
+        run: |
+          echo "ERROR: a job whose if: is false ran its steps"
+          exit 1
 
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+  after-skip:
+    runs-on: ubuntu-latest
+    needs: [never-runs]
+    steps:
+      - name: Assert the upstream job was skipped
+        run: |
+          echo "never-runs result: ${{ needs.never-runs.result }}"
+          if [ "${{ needs.never-runs.result }}" != "skipped" ]; then
+            echo "ERROR: expected the skipped job to report 'skipped'"
+            exit 1
+          fi
 
-      - name: Build
-        run: cargo build --all-targets
+  # Reusable-workflow call. The translator inlines this at translation time: the
+  # `call-build` job does not appear in the continued pipeline at all, and the
+  # called workflow's two jobs run in its place as `call-build-compile` and
+  # `call-build-package`. `call-build-compile` inherits this call's `needs:
+  # prepare`, and `report` below waits on `call-build-package` -- the callee's
+  # terminal job -- so the call behaves as one barrier the way GitHub treats it.
+  #
+  # The callee is at .github/workflows/reusable-workflow-callee.yml because a
+  # local `uses:` is written relative to the repository root. It is inert there:
+  # its only trigger is `workflow_call`, so GitHub never runs it on its own.
+  #
+  # Reusable workflows work only on the CLI translate path, which can read the
+  # callee from the checkout. This scenario is therefore the end-to-end coverage
+  # for the feature; the HTTP endpoint refuses such a call outright.
+  call-build:
+    needs: prepare
+    uses: ./.github/workflows/reusable-workflow-callee.yml
+    with:
+      target: release
 
-      - name: Test
-        run: cargo test --all
-
-      - name: Attribution accuracy gate
-        run: cargo test -p vasari-core --test attribution_accuracy -- --ignored --nocapture
+  report:
+    runs-on: ubuntu-latest
+    needs: [build, test, call-build]
+    steps:
+      - name: Verify all jobs passed
+        run: |
+          echo "build result: ${{ needs.build.result }}"
+          echo "test result: ${{ needs.test.result }}"
+          if [ "${{ needs.build.result }}" = "success" ] && [ "${{ needs.test.result }}" = "success" ]; then
+            echo "All jobs passed — workflow complete"
+          else
+            echo "ERROR: One or more jobs failed"
+            exit 1
+          fi
